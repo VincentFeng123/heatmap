@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DEFAULT_CHANNEL_ID } from "../api/latest.js";
 import {
   buildThingSpeakUrl,
   parseThingSpeakFeed
@@ -16,6 +17,10 @@ const simulatedFeed = {
   field5: "96",
   field6: "48"
 };
+
+test("the deployed heatmap defaults to channel 3432834", () => {
+  assert.equal(DEFAULT_CHANNEL_ID, "3432834");
+});
 
 test("a simulated ThingSpeak row maps to four LDR and two servo values", () => {
   assert.deepEqual(parseThingSpeakFeed(simulatedFeed), {

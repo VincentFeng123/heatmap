@@ -18,9 +18,12 @@ Import this GitHub repository into Vercel and add these project environment
 variables for Production, Preview, and Development:
 
 ```text
-THINGSPEAK_CHANNEL_ID=your_numeric_channel_id
+THINGSPEAK_CHANNEL_ID=3432834
 THINGSPEAK_READ_API_KEY=your_read_api_key
 ```
+
+The app defaults to channel `3432834`, so the channel variable is optional
+unless you want to override it later.
 
 Leave `THINGSPEAK_READ_API_KEY` empty only when the channel is public. For a
 private channel, copy the **Read API Key** from ThingSpeak's API Keys tab. Never

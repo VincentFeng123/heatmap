@@ -1,5 +1,7 @@
 import { buildThingSpeakUrl, parseThingSpeakFeed } from "../lib/thingspeak.js";
 
+export const DEFAULT_CHANNEL_ID = "3432834";
+
 export default async function handler(request, response) {
   response.setHeader("Cache-Control", "no-store, max-age=0");
 
@@ -8,14 +10,8 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: "Method not allowed" });
   }
 
-  const channelId = process.env.THINGSPEAK_CHANNEL_ID;
+  const channelId = process.env.THINGSPEAK_CHANNEL_ID || DEFAULT_CHANNEL_ID;
   const readApiKey = process.env.THINGSPEAK_READ_API_KEY || "";
-
-  if (!channelId) {
-    return response.status(500).json({
-      error: "THINGSPEAK_CHANNEL_ID is not configured"
-    });
-  }
 
   let url;
   try {

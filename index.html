@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Live four-corner solar tracker light heatmap from ThingSpeak">
+  <title>Solar Tracker Heatmap</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --background: #f4f5f7;
+      --foreground: #17181a;
+      --muted: #e3e5e8;
+      --muted-foreground: #595d64;
+      --card: #ffffff;
+      --card-foreground: #17181a;
+      --border: #cfd2d7;
+      --primary: #17181a;
+      --primary-foreground: #ffffff;
+      --success: #18794e;
+      --danger: #b42318;
+      --grid-minor: rgba(255, 255, 255, 0.18);
+      --grid-major: rgba(255, 255, 255, 0.48);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --background: #111214;
+        --foreground: #f4f5f7;
+        --muted: #24262a;
+        --muted-foreground: #a8adb5;
+        --card: #191b1f;
+        --card-foreground: #f4f5f7;
+        --border: #373a40;
+        --primary: #f4f5f7;
+        --primary-foreground: #17181a;
+        --success: #53c28b;
+        --danger: #ff7b72;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(100%, 960px);
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.25rem, 3vw, 1.8rem);
+      font-weight: 500;
+    }
+
+    .status {
+      margin: 4px 0 0;
+      color: var(--muted-foreground);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status[data-state="live"] { color: var(--success); }
+    .status[data-state="error"] { color: var(--danger); }
+
+    button {
+      border: 1px solid var(--primary);
+      border-radius: 8px;
+      padding: 9px 14px;
+      background: var(--primary);
+      color: var(--primary-foreground);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--primary) 35%, transparent);
+      outline-offset: 2px;
+    }
+
+    .heat-stage {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--muted);
+    }
+
+    .heat-stage canvas,
+    .dense-grid {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .dense-grid {
+      pointer-events: none;
+      background-image:
+        linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px),
+        linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+      background-size: 3.125% 5%, 3.125% 5%, 12.5% 20%, 12.5% 20%;
+    }
+
+    .corner {
+      position: absolute;
+      z-index: 2;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--card) 82%, transparent);
+      color: var(--card-foreground);
+      backdrop-filter: blur(10px);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .corner strong { font-weight: 500; }
+    .top-left { top: 12px; left: 12px; }
+    .top-right { top: 12px; right: 12px; }
+    .bottom-left { bottom: 12px; left: 12px; }
+    .bottom-right { right: 12px; bottom: 12px; }
+
+    .legend {
+      display: grid;
+      grid-template-columns: auto minmax(120px, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted-foreground);
+      font-size: 0.88rem;
+    }
+
+    .legend-ramp {
+      height: 11px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        #2d0f69,
+        #1d48dc,
+        #00bfff,
+        #00e187,
+        #d0f226,
+        #ffd500,
+        #ff7000,
+        #ff1c14
+      );
+    }
+
+    .telemetry {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted-foreground);
+    }
+
+    #directionStatus { color: var(--foreground); }
+
+    @media (max-width: 520px) {
+      body { padding: 12px; }
+      .heat-stage { aspect-ratio: 4 / 3; }
+      .legend { grid-template-columns: 1fr; text-align: center; gap: 5px; }
+      .telemetry { display: grid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Solar panel light heatmap</h1>
+        <p class="status" id="connectionStatus" data-state="connecting" aria-live="polite">Connecting to ThingSpeak</p>
+      </div>
+      <button type="button" id="liveToggle">Pause live</button>
+    </header>
+
+    <section class="heat-stage" id="heatStage" aria-label="Four-corner solar panel heatmap">
+      <canvas id="heatCanvas" role="img" aria-label="Waiting for live LDR data"></canvas>
+      <div class="dense-grid" aria-hidden="true"></div>
+      <div class="corner top-left">TL&nbsp; <strong id="valueTL">—</strong></div>
+      <div class="corner top-right">TR&nbsp; <strong id="valueTR">—</strong></div>
+      <div class="corner bottom-left">BL&nbsp; <strong id="valueBL">—</strong></div>
+      <div class="corner bottom-right">BR&nbsp; <strong id="valueBR">—</strong></div>
+    </section>
+
+    <div class="legend" aria-label="Higher ADC is darker and lower ADC is brighter">
+      <span>Darker · high ADC</span>
+      <span class="legend-ramp" aria-hidden="true"></span>
+      <span>Brighter · low ADC</span>
+    </div>
+
+    <div class="telemetry" aria-live="polite">
+      <span id="directionStatus">Waiting for the first ThingSpeak entry</span>
+      <span id="servoStatus">Pan — · Tilt —</span>
+    </div>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

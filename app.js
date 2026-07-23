@@ -320,7 +320,7 @@ function drawGround(context, width, height) {
   }
 
   drawWorldLabel(context, "NORTH", vec(0, 0, 5.25), width, height, "#75eee5", "center");
-  drawWorldLabel(context, "EAST", vec(5.25, 0, 0), width, height, "#75eee5", "left");
+  drawWorldLabel(context, "WEST", vec(5.25, 0, 0), width, height, "#75eee5", "left");
 }
 
 function drawBase(context, width, height) {

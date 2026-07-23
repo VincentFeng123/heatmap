@@ -52,17 +52,44 @@
       </figure>
     </section>
 
-    <aside class="data-panel" aria-label="Tracker data">
-      <dl>
-        <div><dt>Pan</dt><dd id="panValue">90.0°</dd></div>
-        <div><dt>Tilt</dt><dd id="tiltValue">60.0°</dd></div>
-        <div><dt>Sun azimuth</dt><dd id="sunAzimuth">145.0°</dd></div>
-        <div><dt>Sun elevation</dt><dd id="sunElevation">35.0°</dd></div>
-        <div><dt>Light average</dt><dd id="lightAverage">1,948</dd></div>
-        <div><dt>Estimated voltage</dt><dd id="estimatedVoltage">1.57 V</dd></div>
-        <div><dt>Predicted pan</dt><dd id="predictedPan">108.0°</dd></div>
-        <div><dt>Predicted tilt</dt><dd id="predictedTilt">52.0°</dd></div>
-      </dl>
+    <aside class="data-panel" aria-label="Tracker telemetry and forecast">
+      <section class="data-group" aria-labelledby="telemetryHeading">
+        <header class="data-heading">
+          <h2 id="telemetryHeading">Telemetry</h2>
+          <span>live input</span>
+        </header>
+        <dl>
+          <div><dt>Pan command</dt><dd id="panValue">90.0°</dd></div>
+          <div><dt>Tilt command</dt><dd id="tiltValue">60.0°</dd></div>
+          <div><dt>Sun azimuth</dt><dd id="sunAzimuth">145.0°</dd></div>
+          <div><dt>Sun elevation</dt><dd id="sunElevation">35.0°</dd></div>
+          <div><dt>Light average</dt><dd id="lightAverage">1,948</dd></div>
+          <div><dt>Estimated voltage</dt><dd id="estimatedVoltage">1.57 V</dd></div>
+        </dl>
+      </section>
+
+      <section
+        class="data-group forecast-group"
+        aria-labelledby="forecastHeading"
+      >
+        <header class="data-heading">
+          <h2 id="forecastHeading">Laplace forecast</h2>
+          <span id="forecastBadge">causal</span>
+        </header>
+        <dl>
+          <div><dt>Predicted pan</dt><dd id="predictedPan">90.0°</dd></div>
+          <div><dt>Predicted tilt</dt><dd id="predictedTilt">60.0°</dd></div>
+          <div><dt>Horizon</dt><dd id="predictionHorizon">20.0 s</dd></div>
+          <div><dt>Response model</dt><dd id="predictionModel">prior</dd></div>
+          <div><dt>Expected lock</dt><dd id="predictionLock">—</dd></div>
+          <div><dt>Replay error</dt><dd id="predictionError">awaiting</dd></div>
+        </dl>
+        <p
+          class="transfer-function"
+          id="transferFunction"
+          title="First-order servo transfer function"
+        >G(s) = e<sup>−0.12s</sup> / (0.35s + 1)</p>
+      </section>
     </aside>
   </main>
 

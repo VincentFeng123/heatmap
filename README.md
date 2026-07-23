@@ -7,6 +7,7 @@ to ThingSpeak; the site mirrors that state as a moving engineering model.
 The dashboard includes:
 
 - a live pan/tilt wireframe with an interpolated light texture;
+- a causal Laplace-derived servo and LDR trajectory forecast;
 - separate panel-facing and astronomical sun vectors;
 - commanded pan/tilt rotation readouts;
 - predicted-versus-facing angular error after sun-lock calibration;
@@ -18,6 +19,46 @@ The dashboard includes:
 Lower ADC values are treated as brighter light. The first balanced, strong,
 above-horizon sample calibrates the relative servo frame to the sun, except at
 the straight-up tilt singularity where azimuth is undefined.
+
+## Laplace-derived prediction
+
+The forecast is generated from the selected telemetry sample and samples that
+occurred before it. It never uses the next sample as an input. During history
+playback, the next sample is withheld until after prediction and is used only
+to display replay error.
+
+The LDR filter uses the same first-order plant as the firmware:
+
+```text
+Hldr(s) = 1 / (0.08s + 1)
+```
+
+The loaded pan and tilt mechanisms are represented by first-order plants with
+transport delay:
+
+```text
+Gp(s) = exp(-0.12s) / (0.35s + 1)
+Gt(s) = exp(-0.12s) / (0.45s + 1)
+```
+
+The browser evaluates the exact zero-order-hold time-domain response
+`x(t + dt) = target + (x(t) - target) * exp(-dt / tau)`. A firmware-matching
+controller advances the two servo commands from the four LDR balance errors,
+then the transfer functions propagate predicted shaft motion and filtered
+sensor response across the expected telemetry interval.
+
+The predictor starts with the firmware's two local response Jacobian priors,
+one on each side of the stacked mount's pan-reversal band. When causal history
+contains usable independent pan and tilt changes, a ridge-regularized local
+fit blends measured command-to-LDR response into those priors. The UI labels
+the result `calibrating` until enough observations are available and reports
+the response-model confidence.
+
+The time constants are engineering estimates for a loaded SG90 mechanism.
+They become calibrated physical predictions only after measuring shaft motion
+with an encoder, feedback potentiometer, or equivalent external observation.
+ThingSpeak fields 5 and 6 are servo commands rather than shaft measurements,
+so history alone cannot identify the true mechanical time constants.
 
 ## ThingSpeak fields
 
@@ -73,6 +114,7 @@ included with the ESP32 Arduino board package.
 
 Fields 5 and 6 are servo commands, not measured shaft angles. Standard SG90
 servos do not report their real position or a stall, so this is a
-command-driven digital shadow. Encoders or feedback servos would turn the pose
-into measured physical state. Likewise, four corner LDRs create an interpolated
-light field rather than a dense camera measurement.
+command-driven dynamic estimate. Encoders or feedback servos would turn the
+pose and transfer-function calibration into measured physical state. Likewise,
+four corner LDRs create an interpolated light field rather than a dense camera
+measurement.

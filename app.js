@@ -10,6 +10,10 @@ import {
   normalizeReadings,
   voltageFromAdc
 } from "./heatmap-core.js";
+import {
+  predictTrackerTrajectory,
+  predictionErrorDegrees
+} from "./laplace-predictor-core.js";
 
 const views = [
   {
@@ -51,12 +55,17 @@ const data = {
   lightAverage: document.getElementById("lightAverage"),
   estimatedVoltage: document.getElementById("estimatedVoltage"),
   predictedPan: document.getElementById("predictedPan"),
-  predictedTilt: document.getElementById("predictedTilt")
+  predictedTilt: document.getElementById("predictedTilt"),
+  predictionHorizon: document.getElementById("predictionHorizon"),
+  predictionModel: document.getElementById("predictionModel"),
+  predictionLock: document.getElementById("predictionLock"),
+  predictionError: document.getElementById("predictionError"),
+  forecastBadge: document.getElementById("forecastBadge"),
+  transferFunction: document.getElementById("transferFunction")
 };
 
 let readings = [1920, 1950, 1980, 1940];
 let lastEntryId = null;
-let lastPose = null;
 let pollTimer = null;
 let polling = true;
 let historyEntries = [];
@@ -74,9 +83,22 @@ const model = {
 };
 
 const target = { ...model };
-const prediction = {
-  pan: 108,
-  tilt: 52
+let prediction = {
+  confidence: 0.12,
+  horizonSeconds: 20,
+  lockedAtSeconds: null,
+  modelSource: "firmware-prior",
+  pan: 90,
+  tilt: 60,
+  trajectory: [
+    { pan: 90, tilt: 60, time: 0 },
+    { pan: 90, tilt: 60, time: 20 }
+  ],
+  transferFunctions: {
+    pan: "e^(-0.12s) / (0.35s + 1)",
+    tilt: "e^(-0.12s) / (0.45s + 1)"
+  },
+  validationError: null
 };
 
 function clamp(value, minimum, maximum) {
@@ -103,6 +125,25 @@ function updateData() {
     `${voltageFromAdc(lightAverage).toFixed(2)} V`;
   data.predictedPan.textContent = formatDegrees(prediction.pan);
   data.predictedTilt.textContent = formatDegrees(prediction.tilt);
+  data.predictionHorizon.textContent =
+    `${prediction.horizonSeconds.toFixed(1)} s`;
+  data.predictionModel.textContent =
+    prediction.modelSource === "history-fit"
+      ? `adaptive · ${Math.round(prediction.confidence * 100)}%`
+      : `prior · ${Math.round(prediction.confidence * 100)}%`;
+  data.predictionLock.textContent =
+    prediction.lockedAtSeconds === null
+      ? "outside horizon"
+      : `${prediction.lockedAtSeconds.toFixed(1)} s`;
+  data.predictionError.textContent =
+    prediction.validationError === null
+      ? "awaiting"
+      : `${prediction.validationError.toFixed(1)}°`;
+  data.forecastBadge.textContent =
+    prediction.modelSource === "history-fit" ? "adaptive" : "calibrating";
+  data.transferFunction.textContent =
+    `Gp(s) ${prediction.transferFunctions.pan} · ` +
+    `Gt(s) ${prediction.transferFunctions.tilt}`;
 }
 
 function entryTimestamp(entry) {
@@ -168,7 +209,32 @@ function updateTimeline() {
   timelineLive.dataset.live = String(atLiveEdge);
 }
 
-function setTelemetryView(telemetry, nextTelemetry = null) {
+function updateForecast(telemetry, causalHistory, validationTelemetry = null) {
+  try {
+    const forecast = predictTrackerTrajectory(telemetry, causalHistory);
+    prediction = {
+      ...forecast,
+      validationError: predictionErrorDegrees(
+        forecast,
+        validationTelemetry
+      )
+    };
+  } catch (_error) {
+    prediction = {
+      ...prediction,
+      pan: Number.isFinite(telemetry.pan) ? telemetry.pan : target.pan,
+      tilt: Number.isFinite(telemetry.tilt) ? telemetry.tilt : target.tilt,
+      trajectory: [],
+      validationError: null
+    };
+  }
+}
+
+function setTelemetryView(
+  telemetry,
+  causalHistory = [telemetry],
+  validationTelemetry = null
+) {
   readings = normalizeReadings(telemetry.readings);
   if (Number.isFinite(telemetry.pan)) target.pan = telemetry.pan;
   if (Number.isFinite(telemetry.tilt)) target.tilt = telemetry.tilt;
@@ -182,15 +248,7 @@ function setTelemetryView(telemetry, nextTelemetry = null) {
     target.sunElevation = telemetry.sunElevation;
   }
 
-  if (nextTelemetry) {
-    prediction.pan = Number.isFinite(nextTelemetry.pan)
-      ? nextTelemetry.pan
-      : target.pan;
-    prediction.tilt = Number.isFinite(nextTelemetry.tilt)
-      ? nextTelemetry.tilt
-      : target.tilt;
-  }
-
+  updateForecast(telemetry, causalHistory, validationTelemetry);
   updateData();
 }
 
@@ -210,9 +268,10 @@ function selectHistoryIndex(index, snap = false) {
   historyIndex = Math.round(clamp(index, 0, lastIndex));
   followingLive = historyIndex === lastIndex;
   const telemetry = historyEntries[historyIndex];
-  const nextTelemetry =
-    historyEntries[Math.min(historyIndex + 1, lastIndex)];
-  setTelemetryView(telemetry, nextTelemetry);
+  const validationTelemetry =
+    historyIndex < lastIndex ? historyEntries[historyIndex + 1] : null;
+  const causalHistory = historyEntries.slice(0, historyIndex + 1);
+  setTelemetryView(telemetry, causalHistory, validationTelemetry);
   if (snap) snapModelToTarget();
   updateTimeline();
 }
@@ -643,20 +702,37 @@ function drawSunVector(center, width, height) {
 function drawPredictedPath(width, height) {
   const center = vec(0, 2.76, 0);
   const path = [];
-  const steps = 5;
+  const forecastPoints =
+    Array.isArray(prediction.trajectory) &&
+    prediction.trajectory.length > 1
+      ? prediction.trajectory
+      : [
+          { pan: model.pan, tilt: model.tilt, time: 0 },
+          {
+            pan: prediction.pan,
+            tilt: prediction.tilt,
+            time: prediction.horizonSeconds
+          }
+        ];
+  const points = [
+    { pan: model.pan, tilt: model.tilt, time: 0 },
+    ...forecastPoints.slice(1)
+  ];
+  const ghostInterval = Math.max(1, Math.floor(points.length / 5));
 
-  for (let index = 0; index <= steps; index += 1) {
-    const amount = index / steps;
-    const pan = model.pan + (prediction.pan - model.pan) * amount;
-    const tilt = model.tilt + (prediction.tilt - model.tilt) * amount;
-    const facing = facingFromServo(pan, tilt);
+  points.forEach((point, index) => {
+    const facing = facingFromServo(point.pan, point.tilt);
     const basis = panelBasisFromFacing(facing);
-    if (!basis) continue;
+    if (!basis) return;
 
     path.push(add(center, scale(basis.normal, 2.25)));
 
-    if (index === 0) continue;
-    const opacity = 0.035 + amount * 0.1;
+    const drawGhost =
+      index > 0 &&
+      (index % ghostInterval === 0 || index === points.length - 1);
+    if (!drawGhost) return;
+    const amount = index / Math.max(1, points.length - 1);
+    const opacity = 0.04 + amount * 0.13;
     const panelWidth = 3.95;
     const panelHeight = 2.35;
     const corners = [
@@ -668,11 +744,11 @@ function drawPredictedPath(width, height) {
 
     strokeWorldPolyline(corners, width, height, {
       closed: true,
-      color: `rgba(255, 255, 255, ${opacity})`,
-      lineWidth: 0.8,
+      color: `rgba(101, 218, 247, ${opacity})`,
+      lineWidth: 0.9,
       dash: [4, 5]
     });
-  }
+  });
 
   if (path.length < 2) return;
   context.save();
@@ -682,8 +758,8 @@ function drawPredictedPath(width, height) {
     if (index === 0) context.moveTo(projected.x, projected.y);
     else context.lineTo(projected.x, projected.y);
   });
-  context.strokeStyle = "rgba(255, 255, 255, 0.38)";
-  context.lineWidth = 1.2;
+  context.strokeStyle = "rgba(101, 218, 247, 0.58)";
+  context.lineWidth = 1.3;
   context.lineCap = "round";
   context.setLineDash([2, 7]);
   context.stroke();
@@ -695,8 +771,8 @@ function drawPredictedPath(width, height) {
     context.arc(projected.x, projected.y, index === path.length - 2 ? 3 : 2, 0, Math.PI * 2);
     context.fillStyle =
       index === path.length - 2
-        ? "rgba(255, 255, 255, 0.72)"
-        : "rgba(255, 255, 255, 0.32)";
+        ? "rgba(130, 230, 255, 0.9)"
+        : "rgba(101, 218, 247, 0.4)";
     context.fill();
   });
   context.restore();
@@ -751,7 +827,9 @@ function drawTwin(view) {
       1
     )} degrees and tilt ${model.tilt.toFixed(
       1
-    )} degrees, with a predicted path toward pan ${prediction.pan.toFixed(
+    )} degrees, with a causal Laplace forecast over ${prediction.horizonSeconds.toFixed(
+      1
+    )} seconds toward pan ${prediction.pan.toFixed(
       1
     )} degrees and tilt ${prediction.tilt.toFixed(1)} degrees`
   );
@@ -789,34 +867,14 @@ async function pollLatest() {
     connectionStatus.textContent = "Connected";
     if (telemetry.entryId === lastEntryId) return;
     lastEntryId = telemetry.entryId;
-
-    const nextPan = Number.isFinite(telemetry.pan)
-      ? telemetry.pan
-      : target.pan;
-    const nextTilt = Number.isFinite(telemetry.tilt)
-      ? telemetry.tilt
-      : target.tilt;
-
-    let projectedPan = nextPan;
-    let projectedTilt = nextTilt;
-    if (lastPose) {
-      const panStep = clamp(nextPan - lastPose.pan, -24, 24);
-      const tiltStep = clamp(nextTilt - lastPose.tilt, -24, 24);
-      projectedPan = clamp(nextPan + panStep * 1.5, 0, 180);
-      projectedTilt = clamp(nextTilt + tiltStep * 1.5, 0, 180);
-    } else {
-      projectedPan = clamp(nextPan + 18, 0, 180);
-      projectedTilt = clamp(nextTilt - 8, 0, 180);
-    }
-
-    lastPose = { pan: nextPan, tilt: nextTilt };
     const liveIndex = upsertHistoryEntry(telemetry);
 
     if (followingLive) {
       historyIndex = liveIndex;
-      prediction.pan = projectedPan;
-      prediction.tilt = projectedTilt;
-      setTelemetryView(telemetry);
+      setTelemetryView(
+        telemetry,
+        historyEntries.slice(0, liveIndex + 1)
+      );
     }
 
     updateTimeline();

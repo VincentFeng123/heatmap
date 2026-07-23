@@ -9,8 +9,7 @@ import {
 import {
   bilinearAdc,
   brightnessFromAdc,
-  normalizeReadings,
-  thermalColor
+  normalizeReadings
 } from "./heatmap-core.js";
 
 const byId = (id) => document.getElementById(id);
@@ -127,6 +126,11 @@ function colorWithAlpha(color, alpha) {
   return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
 }
 
+function monochromeColor(brightness) {
+  const channel = Math.round(12 + clamp(brightness, 0, 1) * 232);
+  return [channel, channel, channel];
+}
+
 function drawHeatmap() {
   const bounds = heatStage.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
@@ -151,7 +155,7 @@ function drawHeatmap() {
     for (let x = 0; x < gridWidth; x += 1) {
       const horizontal = x / (gridWidth - 1);
       const sample = bilinearAdc(readings, horizontal, vertical);
-      const color = thermalColor(brightnessFromAdc(sample));
+      const color = monochromeColor(brightnessFromAdc(sample));
       const offset = (y * gridWidth + x) * 4;
       image.data[offset] = color[0];
       image.data[offset + 1] = color[1];
@@ -204,7 +208,7 @@ function strokeWorldLine(context, first, second, width, height, options = {}) {
   context.beginPath();
   context.moveTo(start.x, start.y);
   context.lineTo(end.x, end.y);
-  context.strokeStyle = options.color || "rgba(117, 238, 229, 0.38)";
+  context.strokeStyle = options.color || "rgba(255, 255, 255, 0.28)";
   context.lineWidth = options.lineWidth || 1;
   context.globalAlpha = options.alpha ?? 1;
   if (options.dash) context.setLineDash(options.dash);
@@ -223,7 +227,7 @@ function strokeWorldPolyline(context, points, width, height, options = {}) {
     else context.lineTo(projected.x, projected.y);
   });
   if (options.closed) context.closePath();
-  context.strokeStyle = options.color || "rgba(117, 238, 229, 0.38)";
+  context.strokeStyle = options.color || "rgba(255, 255, 255, 0.28)";
   context.lineWidth = options.lineWidth || 1;
   context.globalAlpha = options.alpha ?? 1;
   if (options.dash) context.setLineDash(options.dash);
@@ -275,7 +279,7 @@ function drawArrow(context, start, vector, length, width, height, options = {}) 
   context.lineTo(-arrowSize * 0.72, 0);
   context.lineTo(-arrowSize, arrowSize * 0.52);
   context.closePath();
-  context.fillStyle = options.color || "#75eee5";
+  context.fillStyle = options.color || "#f4f4ef";
   context.fill();
   context.restore();
 
@@ -297,8 +301,8 @@ function drawGround(context, width, height) {
     const major = coordinate === 0;
     const options = {
       color: major
-        ? "rgba(117, 238, 229, 0.24)"
-        : "rgba(117, 238, 229, 0.075)",
+        ? "rgba(255, 255, 255, 0.18)"
+        : "rgba(255, 255, 255, 0.055)",
       lineWidth: major ? 1.15 : 0.75
     };
     strokeWorldLine(
@@ -319,8 +323,8 @@ function drawGround(context, width, height) {
     );
   }
 
-  drawWorldLabel(context, "NORTH", vec(0, 0, 5.25), width, height, "#75eee5", "center");
-  drawWorldLabel(context, "WEST", vec(5.25, 0, 0), width, height, "#75eee5", "left");
+  drawWorldLabel(context, "NORTH", vec(0, 0, 5.25), width, height, "#b4b4af", "center");
+  drawWorldLabel(context, "WEST", vec(5.25, 0, 0), width, height, "#b4b4af", "left");
 }
 
 function drawBase(context, width, height) {
@@ -337,18 +341,18 @@ function drawBase(context, width, height) {
     top,
     width,
     height,
-    "rgba(27, 91, 96, 0.16)",
-    "rgba(117, 238, 229, 0.42)"
+    "rgba(255, 255, 255, 0.035)",
+    "rgba(255, 255, 255, 0.28)"
   );
 
   bottom.forEach((point, index) => {
     strokeWorldLine(context, point, top[index], width, height, {
-      color: "rgba(117, 238, 229, 0.32)"
+      color: "rgba(255, 255, 255, 0.22)"
     });
   });
   strokeWorldPolyline(context, bottom, width, height, {
     closed: true,
-    color: "rgba(117, 238, 229, 0.22)"
+    color: "rgba(255, 255, 255, 0.14)"
   });
 
   const panRing = [];
@@ -357,16 +361,16 @@ function drawBase(context, width, height) {
     panRing.push(vec(Math.cos(angle) * 0.61, 0.45, Math.sin(angle) * 0.61));
   }
   strokeWorldPolyline(context, panRing, width, height, {
-    color: "rgba(117, 238, 229, 0.65)",
+    color: "rgba(255, 255, 255, 0.48)",
     lineWidth: 1.2
   });
 
   strokeWorldLine(context, vec(0, 0.45, 0), vec(0, 2.72, 0), width, height, {
-    color: "rgba(210, 246, 242, 0.6)",
+    color: "rgba(255, 255, 255, 0.55)",
     lineWidth: 2
   });
   strokeWorldLine(context, vec(-0.1, 0.45, 0), vec(-0.1, 2.72, 0), width, height, {
-    color: "rgba(117, 238, 229, 0.16)"
+    color: "rgba(255, 255, 255, 0.1)"
   });
 }
 
@@ -402,7 +406,7 @@ function drawPanel(context, facing, width, height) {
         (y0 + y1) / 2
       );
       const brightness = brightnessFromAdc(sample);
-      const color = thermalColor(brightness);
+      const color = monochromeColor(brightness);
       const points = [
         panelPoint(center, basis, left, top),
         panelPoint(center, basis, right, top),
@@ -415,7 +419,7 @@ function drawPanel(context, facing, width, height) {
         width,
         height,
         colorWithAlpha(color, 0.045 + brightness * 0.13),
-        "rgba(117, 238, 229, 0.17)"
+        "rgba(255, 255, 255, 0.12)"
       );
     }
   }
@@ -428,7 +432,7 @@ function drawPanel(context, facing, width, height) {
   ];
   strokeWorldPolyline(context, corners, width, height, {
     closed: true,
-    color: "rgba(175, 255, 247, 0.82)",
+    color: "rgba(255, 255, 255, 0.78)",
     lineWidth: 1.6
   });
 
@@ -444,7 +448,7 @@ function drawPanel(context, facing, width, height) {
   const cornerReadings = [readings[0], readings[1], readings[3], readings[2]];
   corners.forEach((corner, index) => {
     const projected = project(corner, width, height);
-    const color = thermalColor(brightnessFromAdc(cornerReadings[index]));
+    const color = monochromeColor(brightnessFromAdc(cornerReadings[index]));
     context.save();
     context.beginPath();
     context.arc(projected.x, projected.y, 4.2, 0, Math.PI * 2);
@@ -463,13 +467,13 @@ function drawPanel(context, facing, width, height) {
     width,
     height,
     {
-      color: "#75eee5",
+      color: "#f4f4ef",
       lineWidth: 1.7,
       arrowSize: 9
     }
   );
   context.save();
-  context.fillStyle = "#75eee5";
+  context.fillStyle = "#f4f4ef";
   context.font = `${Math.max(9, width / 105)}px "DM Mono", monospace`;
   context.fillText(
     "PANEL FACING",
@@ -484,7 +488,7 @@ function drawPanel(context, facing, width, height) {
 function drawSunVector(context, center, sun, width, height) {
   if (!sun) return;
   const arrow = drawArrow(context, center, sun.vector, 3.45, width, height, {
-    color: "#ffc247",
+    color: "#a7a7a2",
     lineWidth: 1.7,
     dash: [7, 5],
     arrowSize: 10
@@ -493,12 +497,12 @@ function drawSunVector(context, center, sun, width, height) {
   context.save();
   context.beginPath();
   context.arc(arrow.end.x, arrow.end.y, 7, 0, Math.PI * 2);
-  context.fillStyle = "#ffc247";
-  context.shadowBlur = 22;
-  context.shadowColor = "#ff9a2f";
+  context.fillStyle = "#d8d8d2";
+  context.shadowBlur = 12;
+  context.shadowColor = "rgba(255, 255, 255, 0.38)";
   context.fill();
   context.font = `${Math.max(9, width / 105)}px "DM Mono", monospace`;
-  context.fillStyle = "#ffc247";
+  context.fillStyle = "#d8d8d2";
   context.fillText(
     `SUN ${Math.round(sun.azimuthDeg)}° / ${Math.round(sun.elevationDeg)}°`,
     arrow.end.x + 12,
@@ -516,7 +520,7 @@ function drawPanArc(context, azimuth, width, height) {
     points.push(vec(Math.sin(angle) * 1.12, 0.49, Math.cos(angle) * 1.12));
   }
   strokeWorldPolyline(context, points, width, height, {
-    color: "rgba(255, 194, 71, 0.58)",
+    color: "rgba(255, 255, 255, 0.38)",
     lineWidth: 1.15
   });
 }

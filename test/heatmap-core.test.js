@@ -6,13 +6,20 @@ import {
   bilinearAdc,
   brightnessFromAdc,
   normalizeReadings,
-  thermalColor
+  thermalColor,
+  voltageFromAdc
 } from "../heatmap-core.js";
 
 test("lower ADC values are brighter", () => {
   assert.equal(brightnessFromAdc(0), 1);
   assert.equal(brightnessFromAdc(4095), 0);
   assert.ok(brightnessFromAdc(500) > brightnessFromAdc(3000));
+});
+
+test("ADC readings convert to estimated 3.3 V sensor voltage", () => {
+  assert.equal(voltageFromAdc(0), 0);
+  assert.equal(voltageFromAdc(4095), 3.3);
+  assert.ok(Math.abs(voltageFromAdc(2048) - 1.6504) < 0.001);
 });
 
 test("bilinear interpolation preserves all four sensor corners", () => {

@@ -3,8 +3,10 @@ import test from "node:test";
 
 import { DEFAULT_CHANNEL_ID } from "../api/latest.js";
 import {
+  buildThingSpeakHistoryUrl,
   buildThingSpeakUrl,
-  parseThingSpeakFeed
+  parseThingSpeakFeed,
+  parseThingSpeakHistory
 } from "../lib/thingspeak.js";
 
 const simulatedFeed = {
@@ -71,6 +73,27 @@ test("the private read key stays in the server-side ThingSpeak request", () => {
 test("public channels omit the read key", () => {
   const url = buildThingSpeakUrl(3432834);
   assert.equal(url.search, "");
+});
+
+test("history requests keep their result limit and private key server-side", () => {
+  const url = buildThingSpeakHistoryUrl("3432834", "private-read-key", 240);
+  assert.equal(url.pathname, "/channels/3432834/feeds.json");
+  assert.equal(url.searchParams.get("results"), "240");
+  assert.equal(url.searchParams.get("api_key"), "private-read-key");
+});
+
+test("ThingSpeak history parses each feed in chronological order", () => {
+  const nextFeed = {
+    ...simulatedFeed,
+    entry_id: 43,
+    created_at: "2026-07-21T17:00:20Z",
+    field5: "102"
+  };
+  const history = parseThingSpeakHistory({ feeds: [simulatedFeed, nextFeed] });
+  assert.equal(history.length, 2);
+  assert.equal(history[0].entryId, 42);
+  assert.equal(history[1].entryId, 43);
+  assert.equal(history[1].pan, 102);
 });
 
 test("incomplete sensor rows are rejected", () => {

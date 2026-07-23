@@ -1,7 +1,5 @@
 import {
-  deriveTwinState,
   facingFromServo,
-  normalizeAzimuth,
   panelBasisFromFacing,
   shortestAngularDelta,
   sphericalToUnitVector
@@ -9,170 +7,301 @@ import {
 import {
   bilinearAdc,
   brightnessFromAdc,
-  normalizeReadings
+  normalizeReadings,
+  voltageFromAdc
 } from "./heatmap-core.js";
 
-const byId = (id) => document.getElementById(id);
-const MIN_SUN_LOCK_BRIGHTNESS = 4000;
-
-const heatStage = byId("heatStage");
-const heatCanvas = byId("heatCanvas");
-const heatContext = heatCanvas.getContext("2d", { alpha: false });
-const twinStage = byId("twinStage");
-const twinCanvas = byId("twinCanvas");
-const twinContext = twinCanvas.getContext("2d");
-const connectionStatus = byId("connectionStatus");
-const liveToggle = byId("liveToggle");
-
-const valueElements = [
-  byId("valueTL"),
-  byId("valueTR"),
-  byId("valueBL"),
-  byId("valueBR")
-];
-
-const display = {
-  directionStatus: byId("directionStatus"),
-  servoStatus: byId("servoStatus"),
-  sunAzimuth: byId("sunAzimuth"),
-  sunElevation: byId("sunElevation"),
-  sunState: byId("sunState"),
-  sunGaugeMarker: byId("sunGaugeMarker"),
-  panelAzimuth: byId("panelAzimuth"),
-  panelElevation: byId("panelElevation"),
-  panValue: byId("panValue"),
-  tiltValue: byId("tiltValue"),
-  panTrack: byId("panTrack"),
-  tiltTrack: byId("tiltTrack"),
-  horizontalError: byId("horizontalError"),
-  verticalError: byId("verticalError"),
-  totalLight: byId("totalLight"),
-  brightestCorner: byId("brightestCorner"),
-  balanceState: byId("balanceState"),
-  azimuthError: byId("azimuthError"),
-  elevationError: byId("elevationError"),
-  angularError: byId("angularError"),
-  errorOrbitPanel: byId("errorOrbitPanel"),
-  calibrationStatus: byId("calibrationStatus"),
-  facingMode: byId("facingMode"),
-  dataAge: byId("dataAge"),
-  entryId: byId("entryId"),
-  twinHealth: byId("twinHealth"),
-  directionArrow: byId("directionArrow"),
-  footerTimestamp: byId("footerTimestamp")
+const views = [
+  {
+    name: "Perspective",
+    mode: "perspective",
+    stage: document.getElementById("perspectiveStage"),
+    canvas: document.getElementById("perspectiveCanvas")
+  },
+  {
+    name: "Top",
+    mode: "top",
+    stage: document.getElementById("topStage"),
+    canvas: document.getElementById("topCanvas")
+  },
+  {
+    name: "Side",
+    mode: "side",
+    stage: document.getElementById("sideStage"),
+    canvas: document.getElementById("sideCanvas")
+  }
+].map((view) => ({
+  ...view,
+  context: view.canvas.getContext("2d")
+}));
+let context = views[0].context;
+let projectionMode = views[0].mode;
+const connection = document.querySelector(".connection");
+const connectionStatus = document.getElementById("connectionStatus");
+const liveToggle = document.getElementById("liveToggle");
+const playbackToggle = document.getElementById("playbackToggle");
+const timelineSlider = document.getElementById("timelineSlider");
+const timelineTime = document.getElementById("timelineTime");
+const timelineLive = document.getElementById("timelineLive");
+const data = {
+  pan: document.getElementById("panValue"),
+  tilt: document.getElementById("tiltValue"),
+  sunAzimuth: document.getElementById("sunAzimuth"),
+  sunElevation: document.getElementById("sunElevation"),
+  lightAverage: document.getElementById("lightAverage"),
+  estimatedVoltage: document.getElementById("estimatedVoltage"),
+  predictedPan: document.getElementById("predictedPan"),
+  predictedTilt: document.getElementById("predictedTilt")
 };
 
-let readings = [4095, 4095, 4095, 4095];
+let readings = [1920, 1950, 1980, 1940];
 let lastEntryId = null;
-let lastTelemetry = null;
-let lastTwinState = null;
+let lastPose = null;
 let pollTimer = null;
-let polling = false;
-let calibration = null;
+let polling = true;
+let historyEntries = [];
+let historyIndex = -1;
+let playbackTimer = null;
+let playbackPlaying = false;
+let followingLive = true;
 
 const model = {
   pan: 90,
-  tilt: 90,
-  sunAzimuth: 180,
-  sunElevation: 20,
-  hasSun: false,
-  hasPose: false
+  tilt: 60,
+  sunAzimuth: 145,
+  sunElevation: 35,
+  hasSun: true
 };
 
-const targetModel = { ...model };
+const target = { ...model };
+const prediction = {
+  pan: 108,
+  tilt: 52
+};
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function formatNumber(value, digits = 0) {
-  if (!Number.isFinite(value)) return "—";
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  });
+function formatDegrees(value) {
+  return Number.isFinite(value) ? `${value.toFixed(1)}°` : "—";
 }
 
-function formatDegrees(value, digits = 1) {
-  return Number.isFinite(value) ? `${formatNumber(value, digits)}°` : "—";
+function updateData() {
+  const lightAverage =
+    readings.reduce((sum, value) => sum + value, 0) / readings.length;
+  data.pan.textContent = formatDegrees(target.pan);
+  data.tilt.textContent = formatDegrees(target.tilt);
+  data.sunAzimuth.textContent = target.hasSun
+    ? formatDegrees(target.sunAzimuth)
+    : "—";
+  data.sunElevation.textContent = target.hasSun
+    ? formatDegrees(target.sunElevation)
+    : "—";
+  data.lightAverage.textContent = Math.round(lightAverage).toLocaleString();
+  data.estimatedVoltage.textContent =
+    `${voltageFromAdc(lightAverage).toFixed(2)} V`;
+  data.predictedPan.textContent = formatDegrees(prediction.pan);
+  data.predictedTilt.textContent = formatDegrees(prediction.tilt);
 }
 
-function formatSignedDegrees(value, digits = 1) {
-  if (!Number.isFinite(value)) return "—";
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatNumber(value, digits)}°`;
+function entryTimestamp(entry) {
+  const timestamp = Date.parse(entry?.createdAt || "");
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function formatTimestamp(timestamp) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "TIME UNAVAILABLE";
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit"
-  }).toUpperCase();
+function formatTimelineDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(
+      seconds
+    ).padStart(2, "0")}`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function formatAge(ageMs) {
-  if (!Number.isFinite(ageMs)) return "AGE UNKNOWN";
-  if (ageMs < 1000) return "LIVE / NOW";
-  if (ageMs < 60_000) return `LIVE / ${Math.floor(ageMs / 1000)}s OLD`;
-  return `STALE / ${Math.floor(ageMs / 60_000)}m OLD`;
-}
-
-function colorWithAlpha(color, alpha) {
-  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-}
-
-function monochromeColor(brightness) {
-  const channel = Math.round(12 + clamp(brightness, 0, 1) * 232);
-  return [channel, channel, channel];
-}
-
-function drawHeatmap() {
-  const bounds = heatStage.getBoundingClientRect();
-  if (!bounds.width || !bounds.height) return;
-
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  heatCanvas.width = Math.round(bounds.width * pixelRatio);
-  heatCanvas.height = Math.round(bounds.height * pixelRatio);
-
-  const gridWidth = 160;
-  const gridHeight = Math.max(
-    80,
-    Math.round(gridWidth * bounds.height / bounds.width)
+function updateTimeline() {
+  const lastIndex = Math.max(0, historyEntries.length - 1);
+  const selectedIndex = clamp(historyIndex, 0, lastIndex);
+  timelineSlider.max = String(lastIndex);
+  timelineSlider.value = String(selectedIndex);
+  timelineSlider.disabled = historyEntries.length < 2;
+  const progress =
+    lastIndex > 0 ? (selectedIndex / lastIndex) * 100 : 100;
+  timelineSlider.style.setProperty(
+    "--timeline-progress",
+    `${progress.toFixed(2)}%`
   );
-  const buffer = document.createElement("canvas");
-  buffer.width = gridWidth;
-  buffer.height = gridHeight;
-  const bufferContext = buffer.getContext("2d");
-  const image = bufferContext.createImageData(gridWidth, gridHeight);
+  timelineSlider.setAttribute(
+    "aria-valuetext",
+    historyEntries.length
+      ? `${selectedIndex + 1} of ${historyEntries.length}`
+      : "No movement history"
+  );
 
-  for (let y = 0; y < gridHeight; y += 1) {
-    const vertical = y / (gridHeight - 1);
-    for (let x = 0; x < gridWidth; x += 1) {
-      const horizontal = x / (gridWidth - 1);
-      const sample = bilinearAdc(readings, horizontal, vertical);
-      const color = monochromeColor(brightnessFromAdc(sample));
-      const offset = (y * gridWidth + x) * 4;
-      image.data[offset] = color[0];
-      image.data[offset + 1] = color[1];
-      image.data[offset + 2] = color[2];
-      image.data[offset + 3] = 255;
-    }
+  if (historyEntries.length) {
+    const start = entryTimestamp(historyEntries[0]);
+    const selected = entryTimestamp(historyEntries[selectedIndex]);
+    const end = entryTimestamp(historyEntries[lastIndex]);
+    const elapsed =
+      start !== null && selected !== null
+        ? selected - start
+        : selectedIndex * 20_000;
+    const duration =
+      start !== null && end !== null
+        ? end - start
+        : lastIndex * 20_000;
+    timelineTime.textContent =
+      `${formatTimelineDuration(elapsed)} / ` +
+      formatTimelineDuration(duration);
+  } else {
+    timelineTime.textContent = "0:00 / 0:00";
   }
 
-  bufferContext.putImageData(image, 0, 0);
-  heatContext.imageSmoothingEnabled = true;
-  heatContext.drawImage(
-    buffer,
-    0,
-    0,
-    heatCanvas.width,
-    heatCanvas.height
+  const atLiveEdge =
+    followingLive &&
+    historyEntries.length > 0 &&
+    selectedIndex === lastIndex;
+  timelineLive.dataset.live = String(atLiveEdge);
+}
+
+function setTelemetryView(telemetry, nextTelemetry = null) {
+  readings = normalizeReadings(telemetry.readings);
+  if (Number.isFinite(telemetry.pan)) target.pan = telemetry.pan;
+  if (Number.isFinite(telemetry.tilt)) target.tilt = telemetry.tilt;
+
+  const hasSun =
+    Number.isFinite(telemetry.sunAzimuth) &&
+    Number.isFinite(telemetry.sunElevation);
+  target.hasSun = hasSun;
+  if (hasSun) {
+    target.sunAzimuth = telemetry.sunAzimuth;
+    target.sunElevation = telemetry.sunElevation;
+  }
+
+  if (nextTelemetry) {
+    prediction.pan = Number.isFinite(nextTelemetry.pan)
+      ? nextTelemetry.pan
+      : target.pan;
+    prediction.tilt = Number.isFinite(nextTelemetry.tilt)
+      ? nextTelemetry.tilt
+      : target.tilt;
+  }
+
+  updateData();
+}
+
+function snapModelToTarget() {
+  model.pan = target.pan;
+  model.tilt = target.tilt;
+  model.hasSun = target.hasSun;
+  if (target.hasSun) {
+    model.sunAzimuth = target.sunAzimuth;
+    model.sunElevation = target.sunElevation;
+  }
+}
+
+function selectHistoryIndex(index, snap = false) {
+  if (!historyEntries.length) return;
+  const lastIndex = historyEntries.length - 1;
+  historyIndex = Math.round(clamp(index, 0, lastIndex));
+  followingLive = historyIndex === lastIndex;
+  const telemetry = historyEntries[historyIndex];
+  const nextTelemetry =
+    historyEntries[Math.min(historyIndex + 1, lastIndex)];
+  setTelemetryView(telemetry, nextTelemetry);
+  if (snap) snapModelToTarget();
+  updateTimeline();
+}
+
+function stopHistoryPlayback() {
+  playbackPlaying = false;
+  window.clearInterval(playbackTimer);
+  playbackTimer = null;
+  playbackToggle.textContent = "▶";
+  playbackToggle.setAttribute("aria-label", "Play movement history");
+}
+
+function startHistoryPlayback() {
+  if (historyEntries.length < 2) return;
+  if (historyIndex >= historyEntries.length - 1) {
+    selectHistoryIndex(0, true);
+  }
+  playbackPlaying = true;
+  followingLive = false;
+  playbackToggle.textContent = "Ⅱ";
+  playbackToggle.setAttribute("aria-label", "Pause movement history");
+  updateTimeline();
+  playbackTimer = window.setInterval(() => {
+    if (historyIndex >= historyEntries.length - 1) {
+      stopHistoryPlayback();
+      followingLive = true;
+      updateTimeline();
+      return;
+    }
+    selectHistoryIndex(historyIndex + 1);
+  }, 500);
+}
+
+function upsertHistoryEntry(telemetry) {
+  const entryId = String(telemetry.entryId);
+  const existingIndex = historyEntries.findIndex(
+    (entry) => String(entry.entryId) === entryId
   );
+  if (existingIndex >= 0) historyEntries[existingIndex] = telemetry;
+  else historyEntries.push(telemetry);
+
+  historyEntries.sort((first, second) => {
+    const firstTime = entryTimestamp(first) ?? 0;
+    const secondTime = entryTimestamp(second) ?? 0;
+    return firstTime - secondTime;
+  });
+
+  if (historyEntries.length > 240) {
+    const removed = historyEntries.length - 240;
+    historyEntries.splice(0, removed);
+    historyIndex = Math.max(0, historyIndex - removed);
+  }
+
+  return historyEntries.findIndex(
+    (entry) => String(entry.entryId) === entryId
+  );
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch("/api/history?results=120", {
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("History unavailable");
+    const payload = await response.json();
+    if (!Array.isArray(payload.entries)) {
+      throw new Error("History unavailable");
+    }
+
+    const entriesById = new Map();
+    payload.entries.forEach((entry) => {
+      if (entry && Array.isArray(entry.readings) && entry.readings.length === 4) {
+        entriesById.set(String(entry.entryId), entry);
+      }
+    });
+    historyEntries = [...entriesById.values()].sort((first, second) => {
+      const firstTime = entryTimestamp(first) ?? 0;
+      const secondTime = entryTimestamp(second) ?? 0;
+      return firstTime - secondTime;
+    });
+
+    if (historyEntries.length) {
+      selectHistoryIndex(historyEntries.length - 1, true);
+    } else {
+      updateTimeline();
+    }
+  } catch (_error) {
+    updateTimeline();
+  }
 }
 
 function vec(x = 0, y = 0, z = 0) {
@@ -192,33 +321,51 @@ function scale(vector, amount) {
 }
 
 function project(point, width, height) {
+  if (projectionMode === "top") {
+    const drawingScale = Math.min(width / 8.8, height / 8.8);
+    return {
+      x: width * 0.5 + point.x * drawingScale,
+      y: height * 0.5 - point.z * drawingScale
+    };
+  }
+
+  if (projectionMode === "side") {
+    const drawingScale = Math.min(width / 10, height / 5.7);
+    return {
+      x: width * 0.5 + point.z * drawingScale,
+      y: height * 0.93 - point.y * drawingScale
+    };
+  }
+
   const drawingScale = Math.min(width / 12.2, height / 8.4);
   return {
-    x: width * 0.49 + (point.x * 0.84 - point.z * 0.59) * drawingScale,
+    x: width * 0.5 + (point.x * 0.84 - point.z * 0.59) * drawingScale,
     y:
-      height * 0.72 +
+      height * 0.7 +
       (point.x * 0.29 + point.z * 0.34 - point.y) * drawingScale
   };
 }
 
-function strokeWorldLine(context, first, second, width, height, options = {}) {
+function strokeWorldLine(first, second, width, height, options = {}) {
   const start = project(first, width, height);
   const end = project(second, width, height);
+
   context.save();
   context.beginPath();
   context.moveTo(start.x, start.y);
   context.lineTo(end.x, end.y);
   context.strokeStyle = options.color || "rgba(255, 255, 255, 0.28)";
   context.lineWidth = options.lineWidth || 1;
-  context.globalAlpha = options.alpha ?? 1;
   if (options.dash) context.setLineDash(options.dash);
   context.stroke();
   context.restore();
+
   return { start, end };
 }
 
-function strokeWorldPolyline(context, points, width, height, options = {}) {
+function strokeWorldPolyline(points, width, height, options = {}) {
   if (points.length < 2) return;
+
   context.save();
   context.beginPath();
   points.forEach((point, index) => {
@@ -229,13 +376,12 @@ function strokeWorldPolyline(context, points, width, height, options = {}) {
   if (options.closed) context.closePath();
   context.strokeStyle = options.color || "rgba(255, 255, 255, 0.28)";
   context.lineWidth = options.lineWidth || 1;
-  context.globalAlpha = options.alpha ?? 1;
   if (options.dash) context.setLineDash(options.dash);
   context.stroke();
   context.restore();
 }
 
-function fillWorldPolygon(context, points, width, height, fill, stroke) {
+function fillWorldPolygon(points, width, height, fill, stroke) {
   context.save();
   context.beginPath();
   points.forEach((point, index) => {
@@ -254,16 +400,9 @@ function fillWorldPolygon(context, points, width, height, fill, stroke) {
   context.restore();
 }
 
-function drawArrow(context, start, vector, length, width, height, options = {}) {
+function drawArrow(start, vector, length, width, height, options = {}) {
   const endpoint = add(start, scale(vector, length));
-  const projected = strokeWorldLine(
-    context,
-    start,
-    endpoint,
-    width,
-    height,
-    options
-  );
+  const projected = strokeWorldLine(start, endpoint, width, height, options);
   const angle = Math.atan2(
     projected.end.y - projected.start.y,
     projected.end.x - projected.start.x
@@ -283,20 +422,27 @@ function drawArrow(context, start, vector, length, width, height, options = {}) 
   context.fill();
   context.restore();
 
-  return { ...projected, endpoint };
+  return projected;
 }
 
-function drawWorldLabel(context, text, point, width, height, color, alignment) {
-  const projected = project(point, width, height);
-  context.save();
-  context.font = `${Math.max(9, width / 105)}px "DM Mono", monospace`;
-  context.fillStyle = color;
-  context.textAlign = alignment || "left";
-  context.fillText(text, projected.x, projected.y);
-  context.restore();
-}
+function drawGround(width, height) {
+  if (projectionMode === "side") {
+    strokeWorldLine(vec(0, 0, -5), vec(0, 0, 5), width, height, {
+      color: "rgba(255, 255, 255, 0.18)",
+      lineWidth: 1.15
+    });
+    for (let coordinate = -5; coordinate <= 5; coordinate += 1) {
+      strokeWorldLine(
+        vec(0, 0, coordinate),
+        vec(0, 0.1, coordinate),
+        width,
+        height,
+        { color: "rgba(255, 255, 255, 0.1)" }
+      );
+    }
+    return;
+  }
 
-function drawGround(context, width, height) {
   for (let coordinate = -5; coordinate <= 5; coordinate += 1) {
     const major = coordinate === 0;
     const options = {
@@ -305,8 +451,8 @@ function drawGround(context, width, height) {
         : "rgba(255, 255, 255, 0.055)",
       lineWidth: major ? 1.15 : 0.75
     };
+
     strokeWorldLine(
-      context,
       vec(coordinate, 0, -5),
       vec(coordinate, 0, 5),
       width,
@@ -314,7 +460,6 @@ function drawGround(context, width, height) {
       options
     );
     strokeWorldLine(
-      context,
       vec(-5, 0, coordinate),
       vec(5, 0, coordinate),
       width,
@@ -322,12 +467,9 @@ function drawGround(context, width, height) {
       options
     );
   }
-
-  drawWorldLabel(context, "NORTH", vec(0, 0, 5.25), width, height, "#b4b4af", "center");
-  drawWorldLabel(context, "WEST", vec(5.25, 0, 0), width, height, "#b4b4af", "left");
 }
 
-function drawBase(context, width, height) {
+function drawBase(width, height) {
   const bottom = [
     vec(-0.92, 0, -0.68),
     vec(0.92, 0, -0.68),
@@ -337,7 +479,6 @@ function drawBase(context, width, height) {
   const top = bottom.map((point) => add(point, vec(0, 0.36, 0)));
 
   fillWorldPolygon(
-    context,
     top,
     width,
     height,
@@ -346,11 +487,11 @@ function drawBase(context, width, height) {
   );
 
   bottom.forEach((point, index) => {
-    strokeWorldLine(context, point, top[index], width, height, {
+    strokeWorldLine(point, top[index], width, height, {
       color: "rgba(255, 255, 255, 0.22)"
     });
   });
-  strokeWorldPolyline(context, bottom, width, height, {
+  strokeWorldPolyline(bottom, width, height, {
     closed: true,
     color: "rgba(255, 255, 255, 0.14)"
   });
@@ -360,16 +501,16 @@ function drawBase(context, width, height) {
     const angle = (index / 48) * Math.PI * 2;
     panRing.push(vec(Math.cos(angle) * 0.61, 0.45, Math.sin(angle) * 0.61));
   }
-  strokeWorldPolyline(context, panRing, width, height, {
+  strokeWorldPolyline(panRing, width, height, {
     color: "rgba(255, 255, 255, 0.48)",
     lineWidth: 1.2
   });
 
-  strokeWorldLine(context, vec(0, 0.45, 0), vec(0, 2.72, 0), width, height, {
+  strokeWorldLine(vec(0, 0.45, 0), vec(0, 2.72, 0), width, height, {
     color: "rgba(255, 255, 255, 0.55)",
     lineWidth: 2
   });
-  strokeWorldLine(context, vec(-0.1, 0.45, 0), vec(-0.1, 2.72, 0), width, height, {
+  strokeWorldLine(vec(-0.1, 0.45, 0), vec(-0.1, 2.72, 0), width, height, {
     color: "rgba(255, 255, 255, 0.1)"
   });
 }
@@ -381,10 +522,16 @@ function panelPoint(center, basis, horizontal, vertical) {
   );
 }
 
-function drawPanel(context, facing, width, height) {
+function lightColor(brightness, alpha) {
+  const channel = Math.round(12 + clamp(brightness, 0, 1) * 232);
+  return `rgba(${channel}, ${channel}, ${channel}, ${alpha})`;
+}
+
+function drawPanel(facing, width, height) {
   const center = vec(0, 2.76, 0);
   const basis = panelBasisFromFacing(facing);
   if (!basis) return center;
+
   const panelWidth = 3.95;
   const panelHeight = 2.35;
   const columns = 8;
@@ -400,25 +547,20 @@ function drawPanel(context, facing, width, height) {
       const right = (x1 - 0.5) * panelWidth;
       const top = (0.5 - y0) * panelHeight;
       const bottom = (0.5 - y1) * panelHeight;
-      const sample = bilinearAdc(
-        readings,
-        (x0 + x1) / 2,
-        (y0 + y1) / 2
+      const brightness = brightnessFromAdc(
+        bilinearAdc(readings, (x0 + x1) / 2, (y0 + y1) / 2)
       );
-      const brightness = brightnessFromAdc(sample);
-      const color = monochromeColor(brightness);
-      const points = [
-        panelPoint(center, basis, left, top),
-        panelPoint(center, basis, right, top),
-        panelPoint(center, basis, right, bottom),
-        panelPoint(center, basis, left, bottom)
-      ];
+
       fillWorldPolygon(
-        context,
-        points,
+        [
+          panelPoint(center, basis, left, top),
+          panelPoint(center, basis, right, top),
+          panelPoint(center, basis, right, bottom),
+          panelPoint(center, basis, left, bottom)
+        ],
         width,
         height,
-        colorWithAlpha(color, 0.045 + brightness * 0.13),
+        lightColor(brightness, 0.045 + brightness * 0.13),
         "rgba(255, 255, 255, 0.12)"
       );
     }
@@ -430,14 +572,14 @@ function drawPanel(context, facing, width, height) {
     panelPoint(center, basis, panelWidth / 2, -panelHeight / 2),
     panelPoint(center, basis, -panelWidth / 2, -panelHeight / 2)
   ];
-  strokeWorldPolyline(context, corners, width, height, {
+
+  strokeWorldPolyline(corners, width, height, {
     closed: true,
     color: "rgba(255, 255, 255, 0.78)",
     lineWidth: 1.6
   });
 
   strokeWorldLine(
-    context,
     panelPoint(center, basis, -2.25, 0),
     panelPoint(center, basis, 2.25, 0),
     width,
@@ -448,19 +590,18 @@ function drawPanel(context, facing, width, height) {
   const cornerReadings = [readings[0], readings[1], readings[3], readings[2]];
   corners.forEach((corner, index) => {
     const projected = project(corner, width, height);
-    const color = monochromeColor(brightnessFromAdc(cornerReadings[index]));
+    const brightness = brightnessFromAdc(cornerReadings[index]);
     context.save();
     context.beginPath();
     context.arc(projected.x, projected.y, 4.2, 0, Math.PI * 2);
-    context.fillStyle = colorWithAlpha(color, 0.96);
+    context.fillStyle = lightColor(brightness, 0.96);
     context.shadowBlur = 12;
-    context.shadowColor = colorWithAlpha(color, 0.9);
+    context.shadowColor = lightColor(brightness, 0.9);
     context.fill();
     context.restore();
   });
 
-  const normalArrow = drawArrow(
-    context,
+  drawArrow(
     center,
     basis.normal,
     2.25,
@@ -472,22 +613,17 @@ function drawPanel(context, facing, width, height) {
       arrowSize: 9
     }
   );
-  context.save();
-  context.fillStyle = "#f4f4ef";
-  context.font = `${Math.max(9, width / 105)}px "DM Mono", monospace`;
-  context.fillText(
-    "PANEL FACING",
-    normalArrow.end.x + 8,
-    normalArrow.end.y - 7
-  );
-  context.restore();
 
   return center;
 }
 
-function drawSunVector(context, center, sun, width, height) {
-  if (!sun) return;
-  const arrow = drawArrow(context, center, sun.vector, 3.45, width, height, {
+function drawSunVector(center, width, height) {
+  if (!model.hasSun) return;
+  const vector = sphericalToUnitVector(
+    model.sunAzimuth,
+    model.sunElevation
+  );
+  const arrow = drawArrow(center, vector, 3.45, width, height, {
     color: "#a7a7a2",
     lineWidth: 1.7,
     dash: [7, 5],
@@ -501,361 +637,145 @@ function drawSunVector(context, center, sun, width, height) {
   context.shadowBlur = 12;
   context.shadowColor = "rgba(255, 255, 255, 0.38)";
   context.fill();
-  context.font = `${Math.max(9, width / 105)}px "DM Mono", monospace`;
-  context.fillStyle = "#d8d8d2";
-  context.fillText(
-    `SUN ${Math.round(sun.azimuthDeg)}° / ${Math.round(sun.elevationDeg)}°`,
-    arrow.end.x + 12,
-    arrow.end.y + 4
-  );
   context.restore();
 }
 
-function drawPanArc(context, azimuth, width, height) {
-  const points = [];
-  const steps = 36;
-  const radians = (azimuth * Math.PI) / 180;
+function drawPredictedPath(width, height) {
+  const center = vec(0, 2.76, 0);
+  const path = [];
+  const steps = 5;
+
   for (let index = 0; index <= steps; index += 1) {
-    const angle = (index / steps) * radians;
+    const amount = index / steps;
+    const pan = model.pan + (prediction.pan - model.pan) * amount;
+    const tilt = model.tilt + (prediction.tilt - model.tilt) * amount;
+    const facing = facingFromServo(pan, tilt);
+    const basis = panelBasisFromFacing(facing);
+    if (!basis) continue;
+
+    path.push(add(center, scale(basis.normal, 2.25)));
+
+    if (index === 0) continue;
+    const opacity = 0.035 + amount * 0.1;
+    const panelWidth = 3.95;
+    const panelHeight = 2.35;
+    const corners = [
+      panelPoint(center, basis, -panelWidth / 2, panelHeight / 2),
+      panelPoint(center, basis, panelWidth / 2, panelHeight / 2),
+      panelPoint(center, basis, panelWidth / 2, -panelHeight / 2),
+      panelPoint(center, basis, -panelWidth / 2, -panelHeight / 2)
+    ];
+
+    strokeWorldPolyline(corners, width, height, {
+      closed: true,
+      color: `rgba(255, 255, 255, ${opacity})`,
+      lineWidth: 0.8,
+      dash: [4, 5]
+    });
+  }
+
+  if (path.length < 2) return;
+  context.save();
+  context.beginPath();
+  path.forEach((point, index) => {
+    const projected = project(point, width, height);
+    if (index === 0) context.moveTo(projected.x, projected.y);
+    else context.lineTo(projected.x, projected.y);
+  });
+  context.strokeStyle = "rgba(255, 255, 255, 0.38)";
+  context.lineWidth = 1.2;
+  context.lineCap = "round";
+  context.setLineDash([2, 7]);
+  context.stroke();
+  context.setLineDash([]);
+
+  path.slice(1).forEach((point, index) => {
+    const projected = project(point, width, height);
+    context.beginPath();
+    context.arc(projected.x, projected.y, index === path.length - 2 ? 3 : 2, 0, Math.PI * 2);
+    context.fillStyle =
+      index === path.length - 2
+        ? "rgba(255, 255, 255, 0.72)"
+        : "rgba(255, 255, 255, 0.32)";
+    context.fill();
+  });
+  context.restore();
+}
+
+function drawPanArc(azimuth, width, height) {
+  const points = [];
+  const radians = (azimuth * Math.PI) / 180;
+
+  for (let index = 0; index <= 36; index += 1) {
+    const angle = (index / 36) * radians;
     points.push(vec(Math.sin(angle) * 1.12, 0.49, Math.cos(angle) * 1.12));
   }
-  strokeWorldPolyline(context, points, width, height, {
+
+  strokeWorldPolyline(points, width, height, {
     color: "rgba(255, 255, 255, 0.38)",
     lineWidth: 1.15
   });
 }
 
-function currentFacing() {
-  if (!model.hasPose) return null;
-  const relative = facingFromServo(model.pan, model.tilt);
-  if (!relative) return null;
-  const azimuthDeg = normalizeAzimuth(
-    relative.azimuthDeg + (calibration?.azimuthOffsetDeg || 0)
-  );
-  const elevationDeg = clamp(
-    relative.elevationDeg + (calibration?.elevationOffsetDeg || 0),
-    -90,
-    90
-  );
-  return {
-    ...relative,
-    azimuthDeg,
-    elevationDeg,
-    vector: sphericalToUnitVector(azimuthDeg, elevationDeg)
-  };
-}
-
-function drawTwin() {
-  const bounds = twinStage.getBoundingClientRect();
+function drawTwin(view) {
+  const { stage, canvas } = view;
+  context = view.context;
+  projectionMode = view.mode;
+  const bounds = stage.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return;
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const pixelWidth = Math.round(bounds.width * pixelRatio);
-  const pixelHeight = Math.round(bounds.height * pixelRatio);
 
-  if (twinCanvas.width !== pixelWidth || twinCanvas.height !== pixelHeight) {
-    twinCanvas.width = pixelWidth;
-    twinCanvas.height = pixelHeight;
+  const pixelWidth = Math.round(bounds.width);
+  const pixelHeight = Math.round(bounds.height);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
   }
 
-  twinContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  twinContext.clearRect(0, 0, bounds.width, bounds.height);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, bounds.width, bounds.height);
 
-  drawGround(twinContext, bounds.width, bounds.height);
-  drawBase(twinContext, bounds.width, bounds.height);
+  drawGround(bounds.width, bounds.height);
+  drawBase(bounds.width, bounds.height);
 
-  const facing = currentFacing();
+  const facing = facingFromServo(model.pan, model.tilt);
   if (!facing) return;
-  drawPanArc(twinContext, facing.azimuthDeg, bounds.width, bounds.height);
-  const panelCenter = drawPanel(
-    twinContext,
-    facing,
-    bounds.width,
-    bounds.height
-  );
 
-  if (model.hasSun) {
-    drawSunVector(
-      twinContext,
-      panelCenter,
-      {
-        azimuthDeg: model.sunAzimuth,
-        elevationDeg: model.sunElevation,
-        vector: sphericalToUnitVector(model.sunAzimuth, model.sunElevation)
-      },
-      bounds.width,
-      bounds.height
-    );
-  }
+  drawPredictedPath(bounds.width, bounds.height);
+  drawPanArc(facing.azimuthDeg, bounds.width, bounds.height);
+  const panelCenter = drawPanel(facing, bounds.width, bounds.height);
+  drawSunVector(panelCenter, bounds.width, bounds.height);
 
-  twinCanvas.setAttribute(
+  canvas.setAttribute(
     "aria-label",
-    `Wireframe solar tracker. Pan ${model.pan.toFixed(1)} degrees, tilt ${model.tilt.toFixed(1)} degrees. Panel facing ${facing.azimuthDeg.toFixed(1)} degrees azimuth and ${facing.elevationDeg.toFixed(1)} degrees elevation.`
+    `${view.name} wireframe of the COSMOS solar tracker at pan ${model.pan.toFixed(
+      1
+    )} degrees and tilt ${model.tilt.toFixed(
+      1
+    )} degrees, with a predicted path toward pan ${prediction.pan.toFixed(
+      1
+    )} degrees and tilt ${prediction.tilt.toFixed(1)} degrees`
   );
 }
 
-function interpolateAngle(current, target, amount) {
-  const delta = shortestAngularDelta(current, target);
-  return normalizeAzimuth(current + delta * amount);
+function interpolateAngle(current, next, amount) {
+  return current + shortestAngularDelta(current, next) * amount;
 }
 
-function animateTwin() {
+function animate() {
   const response = 0.075;
-  model.pan += (targetModel.pan - model.pan) * response;
-  model.tilt += (targetModel.tilt - model.tilt) * response;
+  model.pan += (target.pan - model.pan) * response;
+  model.tilt += (target.tilt - model.tilt) * response;
   model.sunAzimuth = interpolateAngle(
     model.sunAzimuth,
-    targetModel.sunAzimuth,
+    target.sunAzimuth,
     response
   );
   model.sunElevation +=
-    (targetModel.sunElevation - model.sunElevation) * response;
-  model.hasSun = targetModel.hasSun;
-  model.hasPose = targetModel.hasPose;
-  drawTwin();
-  window.requestAnimationFrame(animateTwin);
-}
+    (target.sunElevation - model.sunElevation) * response;
+  model.hasSun = target.hasSun;
 
-function attemptSunCalibration(twin) {
-  if (
-    calibration ||
-    !twin.balanced ||
-    !twin.facing ||
-    twin.facing.atZenith ||
-    !twin.sun.valid ||
-    !twin.sun.aboveHorizon ||
-    twin.health.status !== "live" ||
-    twin.totalLight < MIN_SUN_LOCK_BRIGHTNESS
-  ) {
-    return;
-  }
-
-  calibration = {
-    azimuthOffsetDeg: shortestAngularDelta(
-      twin.facing.azimuthDeg,
-      twin.sun.azimuthDeg
-    ),
-    elevationOffsetDeg:
-      twin.sun.elevationDeg - twin.facing.elevationDeg,
-    capturedAt: Date.now()
-  };
-}
-
-function calibratedFacing(twin) {
-  if (!twin.facing) return null;
-  if (!calibration) return twin.facing;
-
-  const azimuthDeg = normalizeAzimuth(
-    twin.facing.azimuthDeg + calibration.azimuthOffsetDeg
-  );
-  const elevationDeg = clamp(
-    twin.facing.elevationDeg + calibration.elevationOffsetDeg,
-    -90,
-    90
-  );
-  return {
-    ...twin.facing,
-    azimuthDeg,
-    elevationDeg,
-    vector: sphericalToUnitVector(azimuthDeg, elevationDeg)
-  };
-}
-
-function calculateAlignment(facing, sun) {
-  if (!facing || !sun.valid) return null;
-  const azimuthDeltaDeg = shortestAngularDelta(
-    facing.azimuthDeg,
-    sun.azimuthDeg
-  );
-  const elevationDeltaDeg = sun.elevationDeg - facing.elevationDeg;
-  const dot =
-    facing.vector.x * sun.vector.x +
-    facing.vector.y * sun.vector.y +
-    facing.vector.z * sun.vector.z;
-  return {
-    azimuthDeltaDeg,
-    elevationDeltaDeg,
-    angularSeparationDeg:
-      (Math.acos(clamp(dot, -1, 1)) * 180) / Math.PI
-  };
-}
-
-function updateDirectionArrow(twin) {
-  const horizontal = twin.horizontalError;
-  const vertical = twin.verticalError;
-  const magnitude = Math.hypot(horizontal, vertical);
-  const arrow = display.directionArrow.querySelector("span");
-
-  if (twin.balanced || magnitude < 1) {
-    arrow.style.opacity = "0.22";
-    arrow.style.transform = "translateY(-50%) scaleX(.45)";
-    return;
-  }
-
-  const angle = (Math.atan2(-vertical, horizontal) * 180) / Math.PI;
-  const length = clamp(magnitude / 500, 0.55, 1.15);
-  arrow.style.opacity = "1";
-  arrow.style.transform =
-    `translateY(-50%) rotate(${angle}deg) scaleX(${length})`;
-}
-
-function updateHealth(twin) {
-  display.dataAge.textContent = formatAge(twin.health.ageMs);
-  display.twinHealth.textContent = twin.health.status.toUpperCase();
-  display.twinHealth.style.color =
-    twin.health.status === "live"
-      ? "var(--lime)"
-      : twin.health.status === "stale"
-        ? "var(--danger)"
-        : "var(--sun)";
-
-  if (!polling) {
-    connectionStatus.dataset.state = "paused";
-    connectionStatus.textContent = "Telemetry paused";
-    return;
-  }
-
-  connectionStatus.dataset.state =
-    twin.health.status === "stale" ? "error" : "live";
-  connectionStatus.textContent =
-    `${twin.health.status === "live" ? "Live" : twin.health.status} · ` +
-    `entry ${lastTelemetry?.entryId ?? "—"} · ${formatAge(twin.health.ageMs)}`;
-}
-
-function updateTelemetry(telemetry) {
-  readings = normalizeReadings(telemetry.readings);
-  const twin = deriveTwinState(telemetry);
-  attemptSunCalibration(twin);
-  const facing = calibratedFacing(twin);
-  const alignment = calibration
-    ? calculateAlignment(facing, twin.sun)
-    : null;
-
-  lastTelemetry = telemetry;
-  lastTwinState = twin;
-
-  valueElements.forEach((element, index) => {
-    element.textContent = Math.round(readings[index]);
-  });
-
-  display.directionStatus.textContent =
-    twin.balanced
-      ? `Balanced inside ±${twin.deadband} ADC`
-      : `${twin.horizontalDirection} / ${twin.verticalDirection}`;
-  display.horizontalError.textContent = formatNumber(twin.horizontalError);
-  display.verticalError.textContent = formatNumber(twin.verticalError);
-  display.totalLight.textContent = formatNumber(twin.totalLight);
-  display.brightestCorner.textContent = twin.brightestCorner;
-  display.entryId.textContent = telemetry.entryId ?? "—";
-
-  display.balanceState.dataset.state =
-    twin.health.status !== "live"
-      ? "fault"
-      : twin.balanced
-        ? "balanced"
-        : "correcting";
-  display.balanceState.textContent =
-    twin.health.status !== "live"
-      ? twin.health.status.toUpperCase()
-      : twin.balanced
-        ? "BALANCED"
-        : "CORRECTING";
-
-  display.panValue.textContent = formatNumber(telemetry.pan);
-  display.tiltValue.textContent = formatNumber(telemetry.tilt);
-  display.panTrack.style.width = `${clamp((telemetry.pan / 180) * 100, 0, 100)}%`;
-  display.tiltTrack.style.width = `${clamp((telemetry.tilt / 180) * 100, 0, 100)}%`;
-  display.servoStatus.textContent =
-    `Commanded pose · pan ${formatDegrees(telemetry.pan, 0)} · ` +
-    `tilt ${formatDegrees(telemetry.tilt, 0)}`;
-
-  if (twin.sun.valid) {
-    display.sunAzimuth.textContent = formatNumber(twin.sun.azimuthDeg, 1);
-    display.sunElevation.textContent = formatNumber(twin.sun.elevationDeg, 1);
-    display.sunState.textContent = twin.sun.aboveHorizon
-      ? "Sun above horizon · NOAA estimate from ESP32 time and location"
-      : "Sun below horizon · astronomical estimate only";
-    display.sunGaugeMarker.style.left =
-      `${clamp((twin.sun.elevationDeg / 90) * 100, 0, 100)}%`;
-  } else {
-    display.sunAzimuth.textContent = "—";
-    display.sunElevation.textContent = "—";
-    display.sunState.textContent = "Sun position unavailable";
-    display.sunGaugeMarker.style.left = "0%";
-  }
-
-  if (facing) {
-    display.panelAzimuth.textContent = formatNumber(facing.azimuthDeg, 1);
-    display.panelElevation.textContent = formatNumber(facing.elevationDeg, 1);
-  } else {
-    display.panelAzimuth.textContent = "—";
-    display.panelElevation.textContent = "—";
-  }
-
-  if (calibration) {
-    display.facingMode.textContent = "ABSOLUTE / SUN-LOCKED";
-    display.calibrationStatus.textContent =
-      "Absolute frame calibrated automatically from a balanced LDR sun lock.";
-  } else {
-    display.facingMode.textContent = "RELATIVE / UNCALIBRATED";
-    display.calibrationStatus.textContent =
-      "Facing is relative to the base until a balanced sun lock calibrates north.";
-  }
-
-  if (alignment) {
-    display.azimuthError.textContent = formatSignedDegrees(
-      alignment.azimuthDeltaDeg
-    );
-    display.elevationError.textContent = formatSignedDegrees(
-      alignment.elevationDeltaDeg
-    );
-    display.angularError.textContent = formatDegrees(
-      alignment.angularSeparationDeg
-    );
-    const orbitOffset =
-      clamp(alignment.azimuthDeltaDeg / 90, -1, 1) * 64;
-    display.errorOrbitPanel.style.transform = `translateX(${orbitOffset}px)`;
-  } else {
-    display.azimuthError.textContent = "—";
-    display.elevationError.textContent = "—";
-    display.angularError.textContent = "—";
-    display.errorOrbitPanel.style.transform = "translateX(-55px)";
-  }
-
-  updateDirectionArrow(twin);
-  updateHealth(twin);
-
-  targetModel.pan = Number.isFinite(telemetry.pan) ? telemetry.pan : model.pan;
-  targetModel.tilt = Number.isFinite(telemetry.tilt)
-    ? telemetry.tilt
-    : model.tilt;
-  targetModel.hasSun = twin.sun.valid;
-  targetModel.hasPose = Boolean(twin.facing);
-  if (twin.sun.valid) {
-    targetModel.sunAzimuth = twin.sun.azimuthDeg;
-    targetModel.sunElevation = twin.sun.elevationDeg;
-  }
-
-  heatCanvas.setAttribute(
-    "aria-label",
-    `Light heatmap. Top left ${readings[0]}, top right ${readings[1]}, ` +
-    `bottom left ${readings[2]}, bottom right ${readings[3]}. ` +
-    "Lower values are brighter."
-  );
-  display.footerTimestamp.textContent =
-    `LAST MODEL UPDATE / ${formatTimestamp(telemetry.createdAt)}`;
-  drawHeatmap();
-}
-
-function refreshSampleAge() {
-  if (!lastTelemetry) return;
-  try {
-    const twin = deriveTwinState(lastTelemetry);
-    lastTwinState = twin;
-    updateHealth(twin);
-  } catch (_error) {
-    // A successfully parsed sample should remain valid. Keep the last UI if a
-    // local clock or browser edge case prevents recalculating age.
-  }
+  views.forEach(drawTwin);
+  window.requestAnimationFrame(animate);
 }
 
 async function pollLatest() {
@@ -863,50 +783,92 @@ async function pollLatest() {
 
   try {
     const response = await fetch("/api/latest", { cache: "no-store" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Data request failed");
+    if (!response.ok) throw new Error("Telemetry unavailable");
+    const telemetry = await response.json();
+    connection.dataset.state = "live";
+    connectionStatus.textContent = "Connected";
+    if (telemetry.entryId === lastEntryId) return;
+    lastEntryId = telemetry.entryId;
 
-    if (payload.entryId !== lastEntryId) {
-      lastEntryId = payload.entryId;
-      updateTelemetry(payload);
-    } else if (lastTelemetry) {
-      refreshSampleAge();
+    const nextPan = Number.isFinite(telemetry.pan)
+      ? telemetry.pan
+      : target.pan;
+    const nextTilt = Number.isFinite(telemetry.tilt)
+      ? telemetry.tilt
+      : target.tilt;
+
+    let projectedPan = nextPan;
+    let projectedTilt = nextTilt;
+    if (lastPose) {
+      const panStep = clamp(nextPan - lastPose.pan, -24, 24);
+      const tiltStep = clamp(nextTilt - lastPose.tilt, -24, 24);
+      projectedPan = clamp(nextPan + panStep * 1.5, 0, 180);
+      projectedTilt = clamp(nextTilt + tiltStep * 1.5, 0, 180);
+    } else {
+      projectedPan = clamp(nextPan + 18, 0, 180);
+      projectedTilt = clamp(nextTilt - 8, 0, 180);
     }
-  } catch (error) {
-    connectionStatus.dataset.state = "error";
-    connectionStatus.textContent = error.message;
-    display.twinHealth.textContent = "LINK ERROR";
-    display.twinHealth.style.color = "var(--danger)";
+
+    lastPose = { pan: nextPan, tilt: nextTilt };
+    const liveIndex = upsertHistoryEntry(telemetry);
+
+    if (followingLive) {
+      historyIndex = liveIndex;
+      prediction.pan = projectedPan;
+      prediction.tilt = projectedTilt;
+      setTelemetryView(telemetry);
+    }
+
+    updateTimeline();
+  } catch (_error) {
+    connection.dataset.state = "offline";
+    connectionStatus.textContent = "Offline";
   }
 }
 
-function startPolling() {
-  polling = true;
-  liveToggle.innerHTML = '<span aria-hidden="true">Ⅱ</span> Pause feed';
-  connectionStatus.dataset.state = "connecting";
-  connectionStatus.textContent = "Connecting to ThingSpeak";
-  pollLatest();
-  pollTimer = window.setInterval(pollLatest, 5000);
-}
-
-function stopPolling() {
-  polling = false;
+function setPolling(nextPolling) {
+  polling = nextPolling;
   window.clearInterval(pollTimer);
   pollTimer = null;
-  liveToggle.innerHTML = '<span aria-hidden="true">▶</span> Resume feed';
-  connectionStatus.dataset.state = "paused";
-  connectionStatus.textContent = "Telemetry paused";
+
+  if (polling) {
+    connection.dataset.state = "live";
+    connectionStatus.textContent = "Connecting";
+    liveToggle.textContent = "Pause";
+    pollLatest();
+    pollTimer = window.setInterval(pollLatest, 5000);
+  } else {
+    connection.dataset.state = "paused";
+    connectionStatus.textContent = "Paused";
+    liveToggle.textContent = "Resume";
+  }
 }
 
 liveToggle.addEventListener("click", () => {
-  if (polling) stopPolling();
-  else startPolling();
+  setPolling(!polling);
 });
 
-new ResizeObserver(drawHeatmap).observe(heatStage);
-new ResizeObserver(drawTwin).observe(twinStage);
-window.setInterval(refreshSampleAge, 1000);
+playbackToggle.addEventListener("click", () => {
+  if (playbackPlaying) stopHistoryPlayback();
+  else startHistoryPlayback();
+});
 
-drawHeatmap();
-animateTwin();
-startPolling();
+timelineSlider.addEventListener("input", () => {
+  stopHistoryPlayback();
+  selectHistoryIndex(Number(timelineSlider.value), true);
+});
+
+timelineLive.addEventListener("click", () => {
+  stopHistoryPlayback();
+  if (historyEntries.length) {
+    selectHistoryIndex(historyEntries.length - 1, true);
+  }
+});
+
+views.forEach((view) => {
+  new ResizeObserver(() => drawTwin(view)).observe(view.stage);
+});
+updateData();
+updateTimeline();
+animate();
+loadHistory().finally(() => setPolling(true));

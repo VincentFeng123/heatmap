@@ -30,6 +30,15 @@ export function brightnessFromAdc(value) {
   return 1 - clampAdc(value) / ADC_MAX;
 }
 
+export function voltageFromAdc(value, referenceVoltage = 3.3) {
+  const numericReference = Number(referenceVoltage);
+  const normalizedReference =
+    Number.isFinite(numericReference) && numericReference >= 0
+      ? numericReference
+      : 3.3;
+  return (clampAdc(value) / ADC_MAX) * normalizedReference;
+}
+
 export function bilinearAdc(values, horizontal, vertical) {
   const [topLeft, topRight, bottomLeft, bottomRight] = normalizeReadings(values);
   const x = Math.max(0, Math.min(1, Number(horizontal)));

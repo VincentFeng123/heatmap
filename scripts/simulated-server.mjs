@@ -53,8 +53,59 @@ const contentTypes = {
   ".css": "text/css; charset=utf-8"
 };
 
+function interpolateValue(first, second, amount) {
+  return first + (second - first) * amount;
+}
+
+function simulatedHistory(count = 80) {
+  const now = Date.now();
+  return Array.from({ length: count }, (_unused, index) => {
+    const position =
+      (index / Math.max(1, count - 1)) * (simulatedEntries.length - 1);
+    const firstIndex = Math.floor(position);
+    const secondIndex = Math.min(firstIndex + 1, simulatedEntries.length - 1);
+    const amount = position - firstIndex;
+    const first = simulatedEntries[firstIndex];
+    const second = simulatedEntries[secondIndex];
+    return {
+      entryId: 1000 + index,
+      createdAt: new Date(now - (count - 1 - index) * 20_000).toISOString(),
+      readings: first.readings.map((value, readingIndex) =>
+        Math.round(
+          interpolateValue(value, second.readings[readingIndex], amount)
+        )
+      ),
+      pan: Math.round(interpolateValue(first.pan, second.pan, amount)),
+      tilt: Math.round(interpolateValue(first.tilt, second.tilt, amount)),
+      sunAzimuth: interpolateValue(
+        first.sunAzimuth,
+        second.sunAzimuth,
+        amount
+      ),
+      sunElevation: interpolateValue(
+        first.sunElevation,
+        second.sunElevation,
+        amount
+      )
+    };
+  });
+}
+
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+
+  if (requestUrl.pathname === "/api/history") {
+    const requestedResults = Number(requestUrl.searchParams.get("results"));
+    const count = Number.isFinite(requestedResults)
+      ? Math.max(2, Math.min(240, Math.round(requestedResults)))
+      : 80;
+    response.writeHead(200, {
+      "Cache-Control": "no-store",
+      "Content-Type": "application/json; charset=utf-8"
+    });
+    response.end(JSON.stringify({ entries: simulatedHistory(count) }));
+    return;
+  }
 
   if (requestUrl.pathname === "/api/latest") {
     const index = Math.floor((Date.now() - startedAt) / 5000) % simulatedEntries.length;

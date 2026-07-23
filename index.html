@@ -5,261 +5,93 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta
     name="description"
-    content="Live monochrome digital twin for the COSMOS dual-axis solar tracker"
+    content="Live wireframe of the COSMOS dual-axis solar tracker"
   >
-  <title>COSMOS — Solar Digital Twin</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Instrument+Serif:ital@0;1&display=swap"
-    rel="stylesheet"
-  >
+  <title>COSMOS — Tracker Wireframe</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar reveal">
-      <a class="identity" href="#twin" aria-label="COSMOS solar digital twin">
-        <span class="eyebrow">COSMOS 2026 / UNIT 01</span>
-        <strong>Solar digital twin</strong>
-      </a>
+  <header class="site-header">
+    <h1>COSMOS Tracker</h1>
+    <div class="connection-controls">
+      <span class="connection">
+        <i aria-hidden="true"></i>
+        <span id="connectionStatus" aria-live="polite">Connecting</span>
+      </span>
+      <button id="liveToggle" type="button">Pause</button>
+    </div>
+  </header>
 
-      <div class="live-controls">
-        <div class="connection-cluster">
-          <span class="signal-dot" aria-hidden="true"></span>
-          <div>
-            <span class="eyebrow">ThingSpeak</span>
-            <p
-              class="connection-status"
-              id="connectionStatus"
-              data-state="connecting"
-              aria-live="polite"
-            >Connecting to telemetry</p>
-          </div>
-        </div>
-        <button class="live-toggle" type="button" id="liveToggle">
-          <span aria-hidden="true">Ⅱ</span>
-          Pause
-        </button>
-      </div>
-    </header>
+  <main class="workspace">
+    <section class="views" aria-label="Tracker wireframe views">
+      <figure class="view view-primary" id="perspectiveStage">
+        <canvas
+          id="perspectiveCanvas"
+          role="img"
+          aria-label="Perspective wireframe and predicted path of the COSMOS solar tracker"
+        ></canvas>
+        <figcaption>Perspective</figcaption>
+      </figure>
 
-    <section class="dashboard-grid" id="twin">
-      <article class="module twin-module reveal delay-1">
-        <header class="module-header">
-          <div>
-            <span class="module-index">01 / Kinematic model</span>
-            <h1>Tracker wireframe</h1>
-          </div>
-          <div class="model-key" aria-label="Wireframe legend">
-            <span><i class="key-panel"></i>Panel normal</span>
-            <span><i class="key-sun"></i>Sun vector</span>
-          </div>
-        </header>
+      <figure class="view" id="topStage">
+        <canvas
+          id="topCanvas"
+          role="img"
+          aria-label="Top wireframe and predicted path of the COSMOS solar tracker"
+        ></canvas>
+        <figcaption>Top</figcaption>
+      </figure>
 
-        <div class="twin-stage" id="twinStage">
-          <canvas
-            id="twinCanvas"
-            role="img"
-            aria-label="Waiting for pan, tilt, and sun telemetry"
-          ></canvas>
-          <div class="stage-vignette" aria-hidden="true"></div>
-          <div class="stage-label top-left-label">
-            <span>Source</span>
-            <strong>Command telemetry</strong>
-          </div>
-          <div class="stage-label bottom-right-label">
-            <span>Reference frame</span>
-            <strong id="facingMode">Relative / uncalibrated</strong>
-          </div>
-          <div class="axis-badge axis-n">N</div>
-          <div class="axis-badge axis-w">W</div>
-        </div>
-
-        <footer class="twin-footer">
-          <div class="vector-readout">
-            <span class="eyebrow">Panel facing estimate</span>
-            <strong>
-              <span id="panelAzimuth">—</span><small>° az</small>
-              <b>/</b>
-              <span id="panelElevation">—</span><small>° el</small>
-            </strong>
-          </div>
-          <p class="model-caveat">
-            Commanded SG90 position. Physical shaft feedback is not installed.
-          </p>
-        </footer>
-      </article>
-
-      <aside class="instrument-rail" aria-label="Live tracker data">
-        <header class="rail-header reveal delay-2">
-          <span class="eyebrow">Live data</span>
-          <p>Latest state mirrored from the tracker.</p>
-        </header>
-
-        <article class="module instrument sun-instrument reveal delay-2">
-          <header class="instrument-header">
-            <span class="module-index">02 / Sun</span>
-          </header>
-          <h2>Predicted position</h2>
-          <div class="big-pair">
-            <div>
-              <strong id="sunAzimuth">—</strong>
-              <span>Azimuth</span>
-            </div>
-            <div>
-              <strong id="sunElevation">—</strong>
-              <span>Elevation</span>
-            </div>
-          </div>
-          <div class="horizon-gauge" aria-hidden="true">
-            <span id="sunGaugeMarker"></span>
-          </div>
-          <p class="instrument-note" id="sunState">
-            Waiting for calculated sun position
-          </p>
-        </article>
-
-        <article class="module instrument pose-instrument reveal delay-3">
-          <header class="instrument-header">
-            <span class="module-index">03 / Rotation</span>
-          </header>
-          <h2>Servo commands</h2>
-          <div class="servo-row">
-            <div>
-              <span>Bottom axis</span>
-              <strong>Pan <b id="panValue">—</b>°</strong>
-            </div>
-            <div class="servo-track"><i id="panTrack"></i></div>
-          </div>
-          <div class="servo-row">
-            <div>
-              <span>Upper axis</span>
-              <strong>Tilt <b id="tiltValue">—</b>°</strong>
-            </div>
-            <div class="servo-track"><i id="tiltTrack"></i></div>
-          </div>
-          <p class="instrument-note" id="servoStatus">Pan — · Tilt —</p>
-        </article>
-
-        <article class="module instrument error-instrument reveal delay-3">
-          <header class="instrument-header">
-            <span class="module-index">04 / Alignment</span>
-            <span class="tracking-state" id="balanceState" data-state="waiting">
-              Wait
-            </span>
-          </header>
-          <h2>Prediction vs. facing</h2>
-          <div class="error-orbit" aria-hidden="true">
-            <span class="orbit-sun"></span>
-            <span class="orbit-panel" id="errorOrbitPanel"></span>
-          </div>
-          <div class="error-grid">
-            <div><span>Azimuth Δ</span><strong id="azimuthError">—</strong></div>
-            <div><span>Elevation Δ</span><strong id="elevationError">—</strong></div>
-            <div><span>Vector error</span><strong id="angularError">—</strong></div>
-          </div>
-          <p class="instrument-note" id="calibrationStatus">
-            Facing remains relative until a balanced sun lock calibrates the model.
-          </p>
-        </article>
-
-        <article class="module diagnostics-module reveal delay-4">
-          <header class="instrument-header">
-            <span class="module-index">05 / Sensors</span>
-            <span class="sample-age" id="dataAge">No sample</span>
-          </header>
-          <h2>Alignment telemetry</h2>
-
-          <div class="diagnostic-primary">
-            <div class="direction-arrow" id="directionArrow" aria-hidden="true">
-              <span></span>
-            </div>
-            <div>
-              <span class="eyebrow">LDR correction</span>
-              <strong id="directionStatus">
-                Waiting for the first ThingSpeak entry
-              </strong>
-            </div>
-          </div>
-
-          <dl class="diagnostic-list">
-            <div>
-              <dt>Horizontal error</dt>
-              <dd id="horizontalError">—</dd>
-            </div>
-            <div>
-              <dt>Vertical error</dt>
-              <dd id="verticalError">—</dd>
-            </div>
-            <div>
-              <dt>Total light</dt>
-              <dd id="totalLight">—</dd>
-            </div>
-            <div>
-              <dt>Brightest corner</dt>
-              <dd id="brightestCorner">—</dd>
-            </div>
-            <div>
-              <dt>ThingSpeak entry</dt>
-              <dd id="entryId">—</dd>
-            </div>
-            <div>
-              <dt>Twin health</dt>
-              <dd id="twinHealth">Waiting</dd>
-            </div>
-          </dl>
-
-          <div class="cadence-note">
-            <span>20 s</span>
-            <p>Cloud telemetry cadence</p>
-          </div>
-        </article>
-      </aside>
-
-      <article class="module heat-module reveal delay-2">
-        <header class="module-header compact">
-          <div>
-            <span class="module-index">06 / Panel face</span>
-            <h2>Four-point light field</h2>
-          </div>
-          <span class="heat-rule">Lower ADC = more light</span>
-        </header>
-
-        <div
-          class="heat-stage"
-          id="heatStage"
-          aria-label="Interpolated four-corner solar panel light heatmap"
-        >
-          <canvas
-            id="heatCanvas"
-            role="img"
-            aria-label="Waiting for live LDR data"
-          ></canvas>
-          <div class="dense-grid" aria-hidden="true"></div>
-          <div class="corner top-left">TL <strong id="valueTL">—</strong></div>
-          <div class="corner top-right">TR <strong id="valueTR">—</strong></div>
-          <div class="corner bottom-left">BL <strong id="valueBL">—</strong></div>
-          <div class="corner bottom-right">BR <strong id="valueBR">—</strong></div>
-          <div class="panel-cross" aria-hidden="true"></div>
-        </div>
-
-        <div
-          class="legend"
-          aria-label="Higher ADC is darker and lower ADC is brighter"
-        >
-          <span>High ADC / dim</span>
-          <span class="legend-ramp" aria-hidden="true"></span>
-          <span>Low ADC / bright</span>
-        </div>
-      </article>
+      <figure class="view" id="sideStage">
+        <canvas
+          id="sideCanvas"
+          role="img"
+          aria-label="Side wireframe and predicted path of the COSMOS solar tracker"
+        ></canvas>
+        <figcaption>Side</figcaption>
+      </figure>
     </section>
 
-    <footer class="site-footer">
-      <span>COSMOS solar tracker / digital shadow v1</span>
-      <span id="footerTimestamp">Awaiting telemetry</span>
-    </footer>
+    <aside class="data-panel" aria-label="Tracker data">
+      <dl>
+        <div><dt>Pan</dt><dd id="panValue">90.0°</dd></div>
+        <div><dt>Tilt</dt><dd id="tiltValue">60.0°</dd></div>
+        <div><dt>Sun azimuth</dt><dd id="sunAzimuth">145.0°</dd></div>
+        <div><dt>Sun elevation</dt><dd id="sunElevation">35.0°</dd></div>
+        <div><dt>Light average</dt><dd id="lightAverage">1,948</dd></div>
+        <div><dt>Estimated voltage</dt><dd id="estimatedVoltage">1.57 V</dd></div>
+        <div><dt>Predicted pan</dt><dd id="predictedPan">108.0°</dd></div>
+        <div><dt>Predicted tilt</dt><dd id="predictedTilt">52.0°</dd></div>
+      </dl>
+    </aside>
   </main>
+
+  <section class="timeline-player" aria-label="Movement history player">
+    <button
+      class="player-toggle"
+      id="playbackToggle"
+      type="button"
+      aria-label="Play movement history"
+    >▶</button>
+    <input
+      class="timeline-slider"
+      id="timelineSlider"
+      type="range"
+      min="0"
+      max="0"
+      value="0"
+      step="1"
+      aria-label="Movement history position"
+      disabled
+    >
+    <span class="timeline-time" id="timelineTime">0:00 / 0:00</span>
+    <button
+      class="live-jump"
+      id="timelineLive"
+      type="button"
+      data-live="true"
+    >Live</button>
+  </section>
 
   <script type="module" src="/app.js"></script>
 </body>

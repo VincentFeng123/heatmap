@@ -9,11 +9,41 @@ const port = Number(process.env.PORT || 4173);
 const startedAt = Date.now();
 
 const simulatedEntries = [
-  { readings: [420, 1850, 2960, 3520], pan: 72, tilt: 58 },
-  { readings: [3200, 510, 3420, 2140], pan: 101, tilt: 62 },
-  { readings: [3380, 2810, 460, 2050], pan: 84, tilt: 109 },
-  { readings: [3470, 3010, 2210, 390], pan: 118, tilt: 104 },
-  { readings: [1920, 1950, 1980, 1940], pan: 90, tilt: 90 }
+  {
+    readings: [420, 1850, 2960, 3520],
+    pan: 72,
+    tilt: 58,
+    sunAzimuth: 106.4,
+    sunElevation: 29.8
+  },
+  {
+    readings: [3200, 510, 3420, 2140],
+    pan: 101,
+    tilt: 62,
+    sunAzimuth: 132.7,
+    sunElevation: 47.3
+  },
+  {
+    readings: [3380, 2810, 460, 2050],
+    pan: 84,
+    tilt: 109,
+    sunAzimuth: 175.2,
+    sunElevation: 65.1
+  },
+  {
+    readings: [3470, 3010, 2210, 390],
+    pan: 118,
+    tilt: 104,
+    sunAzimuth: 221.6,
+    sunElevation: 50.4
+  },
+  {
+    readings: [1920, 1950, 1980, 1940],
+    pan: 90,
+    tilt: 60,
+    sunAzimuth: 252.9,
+    sunElevation: 30.6
+  }
 ];
 
 const contentTypes = {

@@ -15,21 +15,50 @@ const simulatedFeed = {
   field3: "2875",
   field4: "3520",
   field5: "96",
-  field6: "48"
+  field6: "48",
+  field7: "236.42",
+  field8: "34.75"
 };
 
 test("the deployed heatmap defaults to channel 3432834", () => {
   assert.equal(DEFAULT_CHANNEL_ID, "3432834");
 });
 
-test("a simulated ThingSpeak row maps to four LDR and two servo values", () => {
+test("a simulated ThingSpeak row maps all sensor, servo, and sun values", () => {
   assert.deepEqual(parseThingSpeakFeed(simulatedFeed), {
     entryId: 42,
     createdAt: "2026-07-21T17:00:00Z",
     readings: [420, 1730, 2875, 3520],
     pan: 96,
-    tilt: 48
+    tilt: 48,
+    sunAzimuth: 236.42,
+    sunElevation: 34.75
   });
+});
+
+test("older feeds without sun telemetry preserve nullable sun values", () => {
+  const { field7: _field7, field8: _field8, ...feedWithoutSun } = simulatedFeed;
+
+  assert.deepEqual(parseThingSpeakFeed(feedWithoutSun), {
+    entryId: 42,
+    createdAt: "2026-07-21T17:00:00Z",
+    readings: [420, 1730, 2875, 3520],
+    pan: 96,
+    tilt: 48,
+    sunAzimuth: null,
+    sunElevation: null
+  });
+});
+
+test("invalid optional sun telemetry is treated as unavailable", () => {
+  const parsed = parseThingSpeakFeed({
+    ...simulatedFeed,
+    field7: "not-a-number",
+    field8: ""
+  });
+
+  assert.equal(parsed.sunAzimuth, null);
+  assert.equal(parsed.sunElevation, null);
 });
 
 test("the private read key stays in the server-side ThingSpeak request", () => {

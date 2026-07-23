@@ -3,215 +3,281 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Live four-corner solar tracker light heatmap from ThingSpeak">
-  <title>Solar Tracker Heatmap</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --background: #f4f5f7;
-      --foreground: #17181a;
-      --muted: #e3e5e8;
-      --muted-foreground: #595d64;
-      --card: #ffffff;
-      --card-foreground: #17181a;
-      --border: #cfd2d7;
-      --primary: #17181a;
-      --primary-foreground: #ffffff;
-      --success: #18794e;
-      --danger: #b42318;
-      --grid-minor: rgba(255, 255, 255, 0.18);
-      --grid-major: rgba(255, 255, 255, 0.48);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --background: #111214;
-        --foreground: #f4f5f7;
-        --muted: #24262a;
-        --muted-foreground: #a8adb5;
-        --card: #191b1f;
-        --card-foreground: #f4f5f7;
-        --border: #373a40;
-        --primary: #f4f5f7;
-        --primary-foreground: #17181a;
-        --success: #53c28b;
-        --danger: #ff7b72;
-      }
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      padding: 20px;
-      background: var(--background);
-      color: var(--foreground);
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    main {
-      width: min(100%, 960px);
-      margin: 0 auto;
-      display: grid;
-      gap: 16px;
-    }
-
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(1.25rem, 3vw, 1.8rem);
-      font-weight: 500;
-    }
-
-    .status {
-      margin: 4px 0 0;
-      color: var(--muted-foreground);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .status[data-state="live"] { color: var(--success); }
-    .status[data-state="error"] { color: var(--danger); }
-
-    button {
-      border: 1px solid var(--primary);
-      border-radius: 8px;
-      padding: 9px 14px;
-      background: var(--primary);
-      color: var(--primary-foreground);
-      font: inherit;
-      cursor: pointer;
-    }
-
-    button:focus-visible {
-      outline: 3px solid color-mix(in srgb, var(--primary) 35%, transparent);
-      outline-offset: 2px;
-    }
-
-    .heat-stage {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 16 / 10;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--muted);
-    }
-
-    .heat-stage canvas,
-    .dense-grid {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-    }
-
-    .dense-grid {
-      pointer-events: none;
-      background-image:
-        linear-gradient(to right, var(--grid-minor) 1px, transparent 1px),
-        linear-gradient(to bottom, var(--grid-minor) 1px, transparent 1px),
-        linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
-        linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
-      background-size: 3.125% 5%, 3.125% 5%, 12.5% 20%, 12.5% 20%;
-    }
-
-    .corner {
-      position: absolute;
-      z-index: 2;
-      padding: 6px 9px;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--card) 82%, transparent);
-      color: var(--card-foreground);
-      backdrop-filter: blur(10px);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .corner strong { font-weight: 500; }
-    .top-left { top: 12px; left: 12px; }
-    .top-right { top: 12px; right: 12px; }
-    .bottom-left { bottom: 12px; left: 12px; }
-    .bottom-right { right: 12px; bottom: 12px; }
-
-    .legend {
-      display: grid;
-      grid-template-columns: auto minmax(120px, 1fr) auto;
-      align-items: center;
-      gap: 10px;
-      color: var(--muted-foreground);
-      font-size: 0.88rem;
-    }
-
-    .legend-ramp {
-      height: 11px;
-      border-radius: 999px;
-      background: linear-gradient(
-        90deg,
-        #2d0f69,
-        #1d48dc,
-        #00bfff,
-        #00e187,
-        #d0f226,
-        #ffd500,
-        #ff7000,
-        #ff1c14
-      );
-    }
-
-    .telemetry {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-      color: var(--muted-foreground);
-    }
-
-    #directionStatus { color: var(--foreground); }
-
-    @media (max-width: 520px) {
-      body { padding: 12px; }
-      .heat-stage { aspect-ratio: 4 / 3; }
-      .legend { grid-template-columns: 1fr; text-align: center; gap: 5px; }
-      .telemetry { display: grid; }
-    }
-  </style>
+  <meta
+    name="description"
+    content="Live wireframe digital twin for the COSMOS dual-axis solar tracker"
+  >
+  <title>COSMOS // Solar Digital Twin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Saira+Condensed:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>Solar panel light heatmap</h1>
-        <p class="status" id="connectionStatus" data-state="connecting" aria-live="polite">Connecting to ThingSpeak</p>
+  <div class="site-noise" aria-hidden="true"></div>
+
+  <main class="shell">
+    <header class="topbar reveal">
+      <a class="identity" href="#twin" aria-label="COSMOS solar digital twin">
+        <span class="identity-mark" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
+        <span>
+          <span class="eyebrow">COSMOS 2026 / UNIT 01</span>
+          <strong>Solar Digital Twin</strong>
+        </span>
+      </a>
+
+      <div class="live-controls">
+        <div class="connection-cluster">
+          <span class="signal-dot" aria-hidden="true"></span>
+          <div>
+            <span class="eyebrow">THINGSPEAK LINK</span>
+            <p
+              class="connection-status"
+              id="connectionStatus"
+              data-state="connecting"
+              aria-live="polite"
+            >Connecting to telemetry</p>
+          </div>
+        </div>
+        <button class="live-toggle" type="button" id="liveToggle">
+          <span aria-hidden="true">Ⅱ</span>
+          Pause feed
+        </button>
       </div>
-      <button type="button" id="liveToggle">Pause live</button>
     </header>
 
-    <section class="heat-stage" id="heatStage" aria-label="Four-corner solar panel heatmap">
-      <canvas id="heatCanvas" role="img" aria-label="Waiting for live LDR data"></canvas>
-      <div class="dense-grid" aria-hidden="true"></div>
-      <div class="corner top-left">TL&nbsp; <strong id="valueTL">—</strong></div>
-      <div class="corner top-right">TR&nbsp; <strong id="valueTR">—</strong></div>
-      <div class="corner bottom-left">BL&nbsp; <strong id="valueBL">—</strong></div>
-      <div class="corner bottom-right">BR&nbsp; <strong id="valueBR">—</strong></div>
+    <section class="hero-grid" id="twin">
+      <article class="module twin-module reveal delay-1">
+        <header class="module-header">
+          <div>
+            <span class="module-index">01 / KINEMATIC MODEL</span>
+            <h1>Tracker wireframe</h1>
+          </div>
+          <div class="model-key" aria-label="Wireframe legend">
+            <span><i class="key-panel"></i>Panel normal</span>
+            <span><i class="key-sun"></i>Sun vector</span>
+          </div>
+        </header>
+
+        <div class="twin-stage" id="twinStage">
+          <canvas
+            id="twinCanvas"
+            role="img"
+            aria-label="Waiting for pan, tilt, and sun telemetry"
+          ></canvas>
+          <div class="stage-vignette" aria-hidden="true"></div>
+          <div class="stage-reticle" aria-hidden="true">
+            <span></span>
+          </div>
+          <div class="stage-label top-left-label">
+            <span>MODEL SOURCE</span>
+            <strong>COMMAND TELEMETRY</strong>
+          </div>
+          <div class="stage-label bottom-right-label">
+            <span>REFERENCE FRAME</span>
+            <strong id="facingMode">RELATIVE / UNCALIBRATED</strong>
+          </div>
+          <div class="axis-badge axis-n">N</div>
+          <div class="axis-badge axis-e">E</div>
+        </div>
+
+        <footer class="twin-footer">
+          <div class="vector-readout">
+            <span class="eyebrow">Panel facing estimate</span>
+            <strong>
+              <span id="panelAzimuth">—</span><small>° AZ</small>
+              <b>/</b>
+              <span id="panelElevation">—</span><small>° EL</small>
+            </strong>
+          </div>
+          <p class="model-caveat">
+            <span>CMD MODEL</span>
+            Mirrors requested SG90 positions; physical angle feedback is not installed.
+          </p>
+        </footer>
+      </article>
+
+      <aside class="instrument-rail">
+        <article class="module instrument sun-instrument reveal delay-2">
+          <header class="instrument-header">
+            <span class="module-index">02 / ASTRONOMICAL MODEL</span>
+            <span class="instrument-icon sun-icon" aria-hidden="true"></span>
+          </header>
+          <h2>Predicted sun</h2>
+          <div class="big-pair">
+            <div>
+              <strong id="sunAzimuth">—</strong>
+              <span>Azimuth / true north</span>
+            </div>
+            <div>
+              <strong id="sunElevation">—</strong>
+              <span>Elevation / horizon</span>
+            </div>
+          </div>
+          <div class="horizon-gauge" aria-hidden="true">
+            <div class="horizon-sky"></div>
+            <span id="sunGaugeMarker"></span>
+          </div>
+          <p class="instrument-note" id="sunState">Waiting for calculated sun position</p>
+        </article>
+
+        <article class="module instrument pose-instrument reveal delay-3">
+          <header class="instrument-header">
+            <span class="module-index">03 / SERVO COMMANDS</span>
+            <span class="instrument-icon joint-icon" aria-hidden="true"></span>
+          </header>
+          <h2>Physical rotation</h2>
+          <div class="servo-row">
+            <div>
+              <span>Bottom axis</span>
+              <strong>PAN <b id="panValue">—</b>°</strong>
+            </div>
+            <div class="servo-track"><i id="panTrack"></i></div>
+          </div>
+          <div class="servo-row">
+            <div>
+              <span>Upper axis</span>
+              <strong>TILT <b id="tiltValue">—</b>°</strong>
+            </div>
+            <div class="servo-track"><i id="tiltTrack"></i></div>
+          </div>
+          <p class="instrument-note" id="servoStatus">Pan — · Tilt —</p>
+        </article>
+
+        <article class="module instrument error-instrument reveal delay-4">
+          <header class="instrument-header">
+            <span class="module-index">04 / TRACKING SOLUTION</span>
+            <span class="tracking-state" id="balanceState" data-state="waiting">WAIT</span>
+          </header>
+          <h2>Prediction vs. facing</h2>
+          <div class="error-orbit" aria-hidden="true">
+            <span class="orbit-sun"></span>
+            <span class="orbit-panel" id="errorOrbitPanel"></span>
+          </div>
+          <div class="error-grid">
+            <div><span>Azimuth Δ</span><strong id="azimuthError">—</strong></div>
+            <div><span>Elevation Δ</span><strong id="elevationError">—</strong></div>
+            <div><span>Vector error</span><strong id="angularError">—</strong></div>
+          </div>
+          <p class="instrument-note" id="calibrationStatus">
+            Facing remains relative until a balanced sun lock calibrates the model.
+          </p>
+        </article>
+      </aside>
     </section>
 
-    <div class="legend" aria-label="Higher ADC is darker and lower ADC is brighter">
-      <span>Darker · high ADC</span>
-      <span class="legend-ramp" aria-hidden="true"></span>
-      <span>Brighter · low ADC</span>
-    </div>
+    <section class="lower-grid">
+      <article class="module heat-module reveal delay-2">
+        <header class="module-header compact">
+          <div>
+            <span class="module-index">05 / PANEL FACE</span>
+            <h2>Four-point light field</h2>
+          </div>
+          <span class="heat-rule">LOWER ADC = MORE LIGHT</span>
+        </header>
 
-    <div class="telemetry" aria-live="polite">
-      <span id="directionStatus">Waiting for the first ThingSpeak entry</span>
-      <span id="servoStatus">Pan — · Tilt —</span>
-    </div>
+        <div
+          class="heat-stage"
+          id="heatStage"
+          aria-label="Interpolated four-corner solar panel light heatmap"
+        >
+          <canvas id="heatCanvas" role="img" aria-label="Waiting for live LDR data"></canvas>
+          <div class="dense-grid" aria-hidden="true"></div>
+          <div class="corner top-left">TL <strong id="valueTL">—</strong></div>
+          <div class="corner top-right">TR <strong id="valueTR">—</strong></div>
+          <div class="corner bottom-left">BL <strong id="valueBL">—</strong></div>
+          <div class="corner bottom-right">BR <strong id="valueBR">—</strong></div>
+          <div class="panel-cross" aria-hidden="true"></div>
+        </div>
+
+        <div class="legend" aria-label="Higher ADC is darker and lower ADC is brighter">
+          <span>HIGH ADC / DIM</span>
+          <span class="legend-ramp" aria-hidden="true"></span>
+          <span>LOW ADC / BRIGHT</span>
+        </div>
+      </article>
+
+      <article class="module diagnostics-module reveal delay-3">
+        <header class="module-header compact">
+          <div>
+            <span class="module-index">06 / LIVE DIAGNOSTICS</span>
+            <h2>Alignment telemetry</h2>
+          </div>
+          <span class="sample-age" id="dataAge">NO SAMPLE</span>
+        </header>
+
+        <div class="diagnostic-primary">
+          <div class="direction-arrow" id="directionArrow" aria-hidden="true">
+            <span></span>
+          </div>
+          <div>
+            <span class="eyebrow">LDR correction request</span>
+            <strong id="directionStatus">Waiting for the first ThingSpeak entry</strong>
+          </div>
+        </div>
+
+        <dl class="diagnostic-list">
+          <div>
+            <dt>Horizontal error</dt>
+            <dd id="horizontalError">—</dd>
+          </div>
+          <div>
+            <dt>Vertical error</dt>
+            <dd id="verticalError">—</dd>
+          </div>
+          <div>
+            <dt>Total measured light</dt>
+            <dd id="totalLight">—</dd>
+          </div>
+          <div>
+            <dt>Brightest corner</dt>
+            <dd id="brightestCorner">—</dd>
+          </div>
+          <div>
+            <dt>ThingSpeak entry</dt>
+            <dd id="entryId">—</dd>
+          </div>
+          <div>
+            <dt>Twin health</dt>
+            <dd id="twinHealth">WAITING</dd>
+          </div>
+        </dl>
+
+        <div class="cadence-note">
+          <span>20 s</span>
+          <p><strong>Telemetry cadence</strong>Visual motion interpolates between cloud updates.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="method-strip reveal delay-4" aria-label="Digital twin data flow">
+      <div>
+        <span>01</span>
+        <p><strong>Predict</strong>UTC time + location generate the solar vector.</p>
+      </div>
+      <i aria-hidden="true"></i>
+      <div>
+        <span>02</span>
+        <p><strong>Mirror</strong>Servo commands rotate the wireframe tracker.</p>
+      </div>
+      <i aria-hidden="true"></i>
+      <div>
+        <span>03</span>
+        <p><strong>Compare</strong>LDR balance measures the remaining light error.</p>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <span>COSMOS SOLAR TRACKER / DIGITAL SHADOW v1</span>
+      <span id="footerTimestamp">AWAITING TELEMETRY</span>
+    </footer>
   </main>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>
